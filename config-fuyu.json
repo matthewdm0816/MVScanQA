@@ -1,0 +1,11 @@
+{
+  "prompts": [
+    "Answer the following ScanQA question based on the image:{}",
+    "Based on the image, answer the following ScanQA question:{}",
+    "{} A short answer to the ScanQA question is:",
+    "Use the provided image to answer the ScanQA question:{}",
+    "What is the answer to the following ScanQA question:{}",
+    "ScanQA Question: {} Short answer:"
+  ],
+  "postfix": "\u0004 {}|ENDOFTEXT||ENDOFTEXT||ENDOFTEXT|"
+}

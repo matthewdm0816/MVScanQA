@@ -1,0 +1,5 @@
+PROMPTS = {
+    "densecap": [
+        ""
+    ]
+}

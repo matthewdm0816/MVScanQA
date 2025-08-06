@@ -1,0 +1,31 @@
+plyfile
+imageio
+opencv-python-headless
+trimesh # ==2.35.39
+tensorboardX
+easydict
+tqdm
+h5py
+matplotlib
+wandb
+colorama
+pandas
+scikit-learn
+spacy
+nltk
+# pycocoevalcap
+
+peft
+transformers
+accelerate
+Pillow==9.4.0
+# deepspeed
+numpy==1.24.2
+networkx==3.0
+icecream
+shapely
+parse
+open_clip_torch
+toml
+pretty_errors
+flask

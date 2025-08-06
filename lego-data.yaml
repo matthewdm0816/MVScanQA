@@ -1,0 +1,32 @@
+# view and selected view
+i2t:
+  scanqa: /scratch/mowentao/BLIP/scene_eval_decl_gpt3.5_aligned_scanqa_qonly_all_video_2.json
+  # scanqa: /scratch/mowentao/BLIP/scene_eval_oracle_qa.json
+  sqa3d: /scratch/mowentao/BLIP/scene_eval_sqa_video_qonly.pkl
+  # scanqa: /scratch/generalvision/ScanQA-feature/scene_view_map_scanqa_qonly_all_clip.pkl
+  # sqa3d: /scratch/generalvision/ScanQA-feature/scene_view_map_sqa_qonly_all_clip.pkl
+  scan2cap: /scratch/generalvision/mowentao/ScanQA/data/scene_bbox_view_map_full.json
+  # scan2cap_val: /scratch/generalvision/mowentao/ScanQA/data/scene_bbox_view_map_for_valtest_mask3d.json
+  scan2cap_val: /scratch/generalvision/mowentao/ScanQA/data/scene_bbox_view_map_for_valtest_vote2cap_detr.json
+
+
+frame_path:
+  scanqa: /scratch/generalvision/ScanQA-feature/frames_square/
+  sqa3d: /scratch/generalvision/ScanQA-feature/frames_square/
+  scan2cap: /scratch/generalvision/ScanQA-feature/frames_square/
+
+# base model
+pretrained:
+  qformer: CH3COOK/bert-base-embedding
+  fuyu: adept/fuyu-8b
+  mistral: mistralai/Mistral-7B-Instruct-v0.1
+
+# inference box
+# scan2cap_predicted_bbox_file: /scratch/generalvision/mowentao/ScanQA/data/scene_bbox_info_for_valtest_mask3d.pkl
+scan2cap_predicted_bbox_file: /scratch/generalvision/mowentao/SVC/i2t/scene_bbox_info_for_valtest_vote2cap_detr.pkl
+
+# # inference
+# generation_method: beam_search
+# num_beams: 5
+# no_repeat_ngram_size: 4
+

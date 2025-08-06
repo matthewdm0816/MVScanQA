@@ -1,0 +1,104 @@
+# dataset
+*.zip
+*.gz
+*.pkl
+data/rendered_images
+data/glove.p
+data/qa
+data/scannetv2_enet.pt
+data/enet_features
+data/frames_square
+data/scannet/scannet_data
+data/scannet/scans
+data/scannetv2_enet.pth
+
+# amturk
+amturk/
+
+# visualize
+scripts/visualize.py
+
+# notebook
+/notebook/
+
+# weights (pretrained model weights)
+/weights/
+
+# vscode
+*.code-workspace
+
+# cache
+data/scannet/__pycache__
+lib/__pycache__
+lib/pointnet2/__pycache__
+models/__pycache__
+utils/__pycache__
+.DS_Store
+._.DS_Store
+._README.md
+._*
+
+# pointnet2
+lib/pointnet2/build/
+lib/pointnet2/dist/
+lib/pointnet2/pointnet2.egg-info/
+
+# output
+outputs/
+
+# log
+log/
+wandb/
+logs_new/
+logs/
+
+# delete
+docs/.DS_Store
+demo/.DS_Store
+
+# misc
+upload/
+
+*.slurm
+*.zip
+data/scannet/scannet_data_full
+
+# data/
+.vscode/
+*.swp
+.ipynb_checkpoints/
+*.ipynb
+*.pyc
+sqa_task/
+*.pth
+*.pkl
+BLIP/
+Point-MAE/
+
+*.7z
+*.zip
+*.gz
+*.pkl
+
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.PNG
+
+LL3DA-main/
+tmp/
+
+framecap_w_objcount_nouncount.json
+
+*.so
+*.o
+*.a
+
+models/phi3v
+leo-output
+debug-logs/
+lib/pointnet2_hpy/
+
+reprod-scripts/
+inject-dataset/
