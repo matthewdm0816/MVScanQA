@@ -9,6 +9,9 @@ This work is accepeted by ACM MM 2025. [Project Page](matthewdm0816.github.io/mv
 ```bash
 pip install -r requirements.txt
 ```
+3. Install Java to use METEOR evaluation package (for Scan2Cap evaluations).
+4. Download [our compiled data](https://huggingface.co/datasets/kmichiru/SVC), and change `SVC_PATH` in `fuyu_utils.py` to your downloaded path.
+
 
 ## Results
 
@@ -68,6 +71,11 @@ We only found finetuning beneficial for MV-ScanQA and SQA3D, so we provide the f
 
 ## Acknowledgements
 We would like to thank [facebookresearch/votenet](https://github.com/facebookresearch/votenet) and [ch3cook-fdu/Vote2Cap-DETR](https://github.com/ch3cook-fdu/Vote2Cap-DETR) for the 3D object detectors.
+
+## Citation
+If you find this codebase useful, please consider citing our work:
+```bibtex
+```
 
 ## License
 This code repository and datasets are licensed under [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/) license.
