@@ -114,9 +114,9 @@ def parse_args():
     parser.add_argument("--i2t_scanqa_mv", type=str, default=f"{SVC_PATH}/i2t/scene_eval_scanqa_mv.pth")
     
 
-    parser.add_argument("--frame_path_scanqa", type=str, default=f"{SVC_PATH}/../frames_square")
-    parser.add_argument("--frame_path_sqa3d", type=str, default=f"{SVC_PATH}/../frames_square")
-    parser.add_argument("--frame_path_scan2cap", type=str, default=f"{SVC_PATH}/../frames_square")
+    parser.add_argument("--frame_path_scanqa", type=str, default=f"{SVC_PATH}/frames_square")
+    parser.add_argument("--frame_path_sqa3d", type=str, default=f"{SVC_PATH}/frames_square")
+    parser.add_argument("--frame_path_scan2cap", type=str, default=f"{SVC_PATH}/frames_square")
 
     
     parser.add_argument("--use_augment", action="store_true")
