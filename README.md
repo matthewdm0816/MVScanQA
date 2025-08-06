@@ -97,6 +97,12 @@ After acquiring trained checkpoints, you can run inference on downstream tasks. 
 ./predict_fuyu.sh
 ```
 
+## TODO
+- [ ] Upload pre-trained checkpoints; Upload pre-trained 3D detector; Upload 1st stage pre-trained 3D feature adapter.
+- [ ] Re-test pre-training/finetuning scripts.
+- [ ] Fix file locations
+- [ ] Add view selection codes and docs.
+
 ## Acknowledgements
 We would like to thank [facebookresearch/votenet](https://github.com/facebookresearch/votenet) and [ch3cook-fdu/Vote2Cap-DETR](https://github.com/ch3cook-fdu/Vote2Cap-DETR) for the 3D object detectors.
 
