@@ -1,3 +1,0 @@
-import transformers
-
-from transformers.generation.beam_constraints import Constraint, DisjunctiveTrie

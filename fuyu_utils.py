@@ -16,6 +16,7 @@ import hashlib
 try:
     import MinkowskiEngine as ME
 except ImportError:
+    ME = None
     pass
 from utils.pc_utils import random_sampling, rotx, roty, rotz
 from iou3d import (
@@ -55,12 +56,9 @@ MEAN_COLOR_RGB = np.array([109.8, 97.2, 83.8])
 N_SHOW_CAPTION_SAMPLES = 10
 
 DATA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
-SVC_PATH = "/hostdir/mwt/SVC"
+SVC_PATH = "/hostdir/mwt/SVC" # <- change this to your SVC path
 
 def print_once(message):
-    # if not hasattr(print_once, "printed"):
-    #     print_once.printed = True
-    #     print(message)
     if not hasattr(print_once, "printed"):
         print_once.printed = set()
     if message not in print_once.printed:
@@ -430,299 +428,6 @@ def get_optimizer_param_groups_by_names_dict(
 
     return param_groups, param_names_groups
 
-
-class ScanQASQA3DDataset(Dataset):
-    @staticmethod
-    def get_annotation_file(split="train") -> str:
-        ANNOTAIONS = {
-            "test_w_obj": f"{DATA_PATH}/qa/ScanQA_v1.0_test_w_obj.json",
-            "test_wo_obj": f"{DATA_PATH}/qa/ScanQA_v1.0_test_wo_obj.json",
-            "train": f"{DATA_PATH}/qa/ScanQA_SQA_merged_train.json",
-            "val": f"{DATA_PATH}/qa/ScanQA_v1.0_val.json",
-        }
-        return ANNOTAIONS[split]
-
-    @staticmethod
-    def get_scene_path() -> str:
-        return f"{DATA_PATH}/scannet/scannet_data"
-
-    @staticmethod
-    def get_multiview_path() -> str:
-        return f"{DATA_PATH}/scannet/scannet_data/enet_feats_maxpool"
-
-    def __init__(
-        self,
-        frame_path,
-        split="train",
-        ratio=1.0,
-        use_color=True,
-        use_height=False,
-        use_normal=False,
-        use_multiview=False,
-        use_augment=False,
-        quantization_size=0.02,
-        num_points=50_000,
-        #  i2t=None,
-    ):
-        self.frame_path = frame_path
-        self.split = split
-        self.annotation = self.get_annotation_file(split)
-        if isinstance(self.annotation, str):
-            self.annotation = json.load(open(self.get_annotation_file(split)))
-        else:
-            assert isinstance(self.annotation, list) # already a (loaded from JSON) list
-
-        if ratio < 1.0:
-            self.annotation = self.annotation[: int(len(self.annotation) * ratio)]
-        # self.i2t = json.load(i2t)["view"]
-        self.i2t_scanqa = json.load(
-            open(
-                "/scratch/mowentao/BLIP/scene_eval_decl_gpt3.5_aligned_scanqa_qonly_all_video_2.json"
-            )
-        )["view"]
-        self.i2t_sqa3d = json.load(
-            open("/scratch/generalvision/ScanQA-feature/scene_view_map_video.json")
-        )["view"]
-
-        self.views_path_scanqa = "/scratch/generalvision/ScanQA-feature/frames_square/"
-        self.views_path_sqa3d = "/scratch/generalvision/ScanQA-feature/selected_images/"
-
-        self.use_color = use_color
-        self.use_height = use_height
-        self.use_normal = use_normal
-        self.use_multiview = use_multiview
-        self.use_augment = use_augment
-
-        self.quantization_size = (
-            quantization_size  # 0.02 ~ MinkowskiEngine default for ScanNet segmentation
-        )
-        self.num_points = num_points  # 50_000 default for ScanRefer
-
-        self._load()
-
-    def _load(self):
-        """
-        Load 3D scene, instance and object information
-        """
-        logger.info("Loading ScanQA data...")
-        # add scannet data
-        self.scene_list = sorted(list(set([data["scene_id"] for data in self.annotation])))
-
-        # load scene data
-        self.scene_data = {}
-        scene_path = self.get_scene_path()
-        for scene_id in self.scene_list:
-            self.scene_data[scene_id] = {}
-            self.scene_data[scene_id]["mesh_vertices"] = np.load(
-                os.path.join(scene_path, scene_id) + "_aligned_vert.npy"
-            )  # axis-aligned
-            self.scene_data[scene_id]["instance_labels"] = np.load(
-                os.path.join(scene_path, scene_id) + "_ins_label.npy"
-            )
-            self.scene_data[scene_id]["semantic_labels"] = np.load(
-                os.path.join(scene_path, scene_id) + "_sem_label.npy"
-            )
-            self.scene_data[scene_id]["instance_bboxes"] = np.load(
-                os.path.join(scene_path, scene_id) + "_aligned_bbox.npy"
-            )
-
-    def _augment_pc(self, point_cloud, do_rotx=True, do_roty=True, do_rotz=True):
-        """
-        Augment partial point cloud and bounding boxes
-        """
-        # ------------------------------- DATA AUGMENTATION ------------------------------
-        if np.random.random() > 0.5:
-            # Flipping along the YZ plane
-            point_cloud[:, 0] = -1 * point_cloud[:, 0]
-            flip_x = -1
-        else:
-            flip_x = 1
-
-        if np.random.random() > 0.5:
-            # Flipping along the XZ plane
-            point_cloud[:, 1] = -1 * point_cloud[:, 1]
-            flip_y = -1
-        else:
-            flip_y = 1
-
-        # Rotation along X-axis
-        if do_rotx:
-            rot_angle = (np.random.random() * np.pi / 18) - np.pi / 36  # -5 ~ +5 degree
-        else:
-            rot_angle = 0
-
-        rot_mat = rotx(rot_angle)
-        point_cloud[:, 0:3] = np.dot(point_cloud[:, 0:3], np.transpose(rot_mat))
-
-        rot_mat_total = rot_mat[:]  # Rx
-
-        # Rotation along Y-axis
-        if do_roty:
-            rot_angle = (np.random.random() * np.pi / 18) - np.pi / 36  # -5 ~ +5 degree
-        else:
-            rot_angle = 0
-        rot_mat = roty(rot_angle)
-        point_cloud[:, 0:3] = np.dot(point_cloud[:, 0:3], np.transpose(rot_mat))
-
-        rot_mat_total = np.dot(rot_mat, rot_mat_total)  # RyRx
-
-        # Rotation along up-axis/Z-axis
-        if do_rotz:
-            rot_angle = (np.random.random() * np.pi / 18) - np.pi / 36  # -5 ~ +5 degree
-        else:
-            rot_angle = 0
-        rot_mat = rotz(rot_angle)
-        point_cloud[:, 0:3] = np.dot(point_cloud[:, 0:3], np.transpose(rot_mat))
-
-        rot_mat_total = np.dot(rot_mat, rot_mat_total)  # RzRyRx
-
-        # Translation
-        point_cloud, factor = self._translate(point_cloud)
-
-        return point_cloud, factor, rot_mat_total, flip_x, flip_y
-
-    def _translate(self, point_set):
-        # unpack
-        coords = point_set[:, :3]
-        # translation factors
-        x_factor = np.random.choice(np.arange(-0.5, 0.501, 0.001), size=1)[0]
-        y_factor = np.random.choice(np.arange(-0.5, 0.501, 0.001), size=1)[0]
-        z_factor = np.random.choice(np.arange(-0.5, 0.501, 0.001), size=1)[0]
-        factor = [x_factor, y_factor, z_factor]
-        # dump
-        coords += factor
-        point_set[:, :3] = coords
-
-        return point_set, factor
-
-    def __len__(self):
-        return len(self.annotation)
-
-    def __getitem__(self, idx):
-        # get question, image, answers
-        question = self.annotation[idx]["question"]
-        question_id = self.annotation[idx]["question_id"]
-        split = "sqa" if "sqa" in self.annotation[idx]["question_id"] else "scanqa"
-        scene_id = self.annotation[idx]["scene_id"]
-        answers = self.annotation[idx]["answers"]
-        if split == "scanqa":
-            image = get_scanqa_image_for_question(
-                self.views_path_scanqa,
-                self.i2t_scanqa,
-                self.annotation[idx]["question_id"],
-            )
-        else:
-            image = get_sqa3d_image_for_question(
-                self.views_path_sqa3d,
-                self.i2t_sqa3d,
-                self.annotation[idx]["question_id"],
-                scene_id,
-            )
-
-        # # merge situation for SQA3D
-        if split == "sqa":
-            situation = self.annotation[idx]["situation"]
-            # situation = situation.split("")
-            # question = f"{situation} {question}"
-
-        # get scene data -- adapted from ScanQA
-        mesh_vertices = self.scene_data[scene_id][
-            "mesh_vertices"
-        ].copy()  # supposedly (50000, 9), xyz, rgb, normal
-        instance_labels = self.scene_data[scene_id]["instance_labels"].copy()
-        semantic_labels = self.scene_data[scene_id]["semantic_labels"].copy()
-        instance_bboxes = self.scene_data[scene_id]["instance_bboxes"].copy()
-
-        # original_point_cloud = mesh_vertices[:,0:3]
-
-        if not self.use_color:
-            point_cloud = mesh_vertices[:, 0:3]
-            pcl_color = mesh_vertices[:, 3:6]
-        else:
-            point_cloud = mesh_vertices[:, 0:6]
-            # point_cloud[:,3:6] = (point_cloud[:,3:6]-MEAN_COLOR_RGB)/256.0
-            point_cloud[:, 3:6] = point_cloud[:, 3:6] / 256.0
-            pcl_color = point_cloud[:, 3:6]
-
-        if self.use_normal:
-            normals = mesh_vertices[:, 6:9]
-            point_cloud = np.concatenate([point_cloud, normals], 1)  # p (50000, 7)
-
-        if self.use_height:
-            floor_height = np.percentile(point_cloud[:, 2], 0.99)
-            height = point_cloud[:, 2] - floor_height
-            point_cloud = np.concatenate([point_cloud, np.expand_dims(height, 1)], 1)
-
-        # load multiview database
-        if self.use_multiview:
-            enet_feats_file = os.path.join(self.get_multiview_path(), scene_id) + ".pkl"
-            multiview = pickle.load(open(enet_feats_file, "rb"))
-            point_cloud = np.concatenate([point_cloud, multiview], 1)  # p (50000, 135)
-
-        point_cloud, choices = random_sampling(
-            point_cloud, self.num_points, return_choices=True
-        )
-        instance_labels = instance_labels[choices]
-        semantic_labels = semantic_labels[choices]
-        pcl_color = pcl_color[choices]
-
-        if self.use_augment and self.split == "train":
-            rotx = (
-                self.pc_tokenizer_type != "vote2cap-detr"
-            )  # vote2cap-detr only rotate on z-axis
-            point_cloud, factor, rot_mat, flip_x, flip_y = self._augment_pc(
-                point_cloud, rotx=rotx, roty=rotx
-            )
-        else:
-            factor = [0, 0, 0]
-            rot_mat = np.eye(3)
-            flip_x = 1
-            flip_y = 1
-
-        # ic(point_cloud.shape, instance_labels.shape, semantic_labels.shape)
-        # ic(point_cloud[:, 3:].max(), point_cloud[:, 3:].min())
-
-        # Minkowski Engine
-        coords, feats, labels = ME.utils.sparse_quantize(
-            coordinates=point_cloud[:, :3],
-            # features=self.normalize_color(point_cloud[:, 3:], is_color_in_range_0_255=True), # FIXME: is this correct?
-            features=self.normalize_color(
-                point_cloud[:, 3:], is_color_in_range_0_255=True
-            ),  # FIXME: is this correct?
-            labels=semantic_labels,
-            quantization_size=self.quantization_size,
-            ignore_label=-100,
-        )
-
-        return {
-            # 2D I-Q-A
-            "question": question,
-            "situation": situation if split == "sqa" else "",
-            "question_id": question_id,
-            "scene_id": scene_id,
-            "answers": answers,
-            "image": image,
-            # 3D
-            "coords": coords,
-            "feats": feats,
-            "labels": labels,
-            "split": split,
-        }
-
-    @staticmethod
-    def normalize_color(color: np.ndarray, is_color_in_range_0_255: bool = False) -> np.ndarray:
-        r"""
-        Convert color in range [0, 1] to [-0.5, 0.5]. If the color is in range [0,
-        255], use the argument `is_color_in_range_0_255=True`.
-
-        `color` (torch.Tensor): Nx3 color feature matrix
-        `is_color_in_range_0_255` (bool): If the color is in range [0, 255] not [0, 1], normalize the color to [0, 1].
-        """
-        if is_color_in_range_0_255:
-            color /= 255
-        color -= 0.5
-        # return color.float()
-        return color.astype(np.float32)
 
 def mutual_iou(predictions, gts) -> np.ndarray:
     """
@@ -1362,7 +1067,7 @@ class VisualInstructionTuningDataset3D(Dataset, PointCloudProcessMixin, LogDatas
             elif self.pc_tokenizer_type in ["pointnet++", "vote2cap-detr"]:
                 point_cloud[:, 3:6] = (point_cloud[:, 3:6] - MEAN_COLOR_RGB) / 256.0
             elif self.pc_tokenizer_type == "frozen":
-                ...
+                ... # DO nothing
             pcl_color = point_cloud[:, 3:6]
 
         if self.use_normal:
@@ -1380,22 +1085,6 @@ class VisualInstructionTuningDataset3D(Dataset, PointCloudProcessMixin, LogDatas
             multiview = pickle.load(open(enet_feats_file, "rb"))
             point_cloud = np.concatenate([point_cloud, multiview], 1)  # p (50000, 135)
             # print(point_cloud.shape)
-
-        # use_random_cuboid = (
-        #     self.use_random_cuboid or self.pc_tokenizer_type == "vote2cap-detr"
-        # ) and self.split == "train"
-        # use_random_cuboid = self.use_random_cuboid and self.split == "train"
-        use_random_cuboid = False
-        if self.use_augment and use_random_cuboid:
-            (
-                point_cloud,
-                instance_bboxes,
-                per_point_labels,
-            ) = self.random_cuboid_augmentor(
-                point_cloud, instance_bboxes, [instance_labels, semantic_labels]
-            )
-            instance_labels = per_point_labels[0]
-            semantic_labels = per_point_labels[1]
 
         point_cloud, choices = random_sampling(
             point_cloud, self.num_points, return_choices=True
@@ -1459,17 +1148,9 @@ class VisualInstructionTuningDataset3D(Dataset, PointCloudProcessMixin, LogDatas
                     # ensure different seed for same index at different time
                 # shuffle_indices = np.random.permutation(len(object_feature))
                 shuffle_indices = generator.permutation(len(object_feature))
-                # shuffled_indices_valid = shuffle_indices[object_mask_np] # the shuffled indices of valid objects (not trimmed again yet)
-                # shuffled_indices_trimmed = np.argsort(np.argsort(shuffled_indices_valid)) # if object_mask is all-true, then shuffled_indices_trimmed == shuffled_indices
-                # shuffled_indices_trimmed = np.argsort(shuffled_indices_valid)
 
                 shuffled_indices_trimmed = np.argsort(shuffle_indices[object_mask_np]) #　0-th goes to shuffled_indices_trimmed[0]-th, 1-th goes to shuffled_indices_trimmed[1]-th, ...
-                # shuffled_indices_trimmed = shuffled_indices_trimmed[object_mask_np] # only valid objects
-                if np.all(object_mask_np):
-                    # assert np.allclose(shuffled_indices_trimmed, shuffle_indices), f"Something wrong with shuffled_indices_trimmed: {shuffled_indices_trimmed}, shuffled_indices: {shuffled_indices}"
-                    pass
 
-                # ic(object_feature.shape, object_mask.shape, predicted_bbox_corners.shape)
                 object_feature = object_feature[shuffle_indices] 
                     # shuffle_indices[0]-th -> 0-th, shuffle_indices[1]-th -> 1-th, ...
                     # so 0-th -> argsort(shuffle_indices)[0]-th, 1-th -> argsort(shuffle_indices)[1]-th, ...
@@ -1513,9 +1194,6 @@ class VisualInstructionTuningDataset3D(Dataset, PointCloudProcessMixin, LogDatas
                 target_id = i
                 break
 
-        # if target_id == -1:
-        #     # logger.warning(f"Target object {object_name} with ID {object_id} not found in scene {scene_id}!")
-        #     target_id = 0 # use the first object
         # --- get related bbox ---
         related_object_bboxes = []
         gt_instance_bboxes = instance_bboxes.copy()
@@ -1541,14 +1219,6 @@ class VisualInstructionTuningDataset3D(Dataset, PointCloudProcessMixin, LogDatas
         
 
         # --- get image ---
-        # if self.name in [
-        #     "scan2cap",
-        #     "scan2obj",
-        #     "scan2cap-nr3d",
-        #     "scan2obj-nr3d",
-        #     "scan2cap-sr3d",
-        #     "scan2obj-sr3d",
-        # ]:
         if self.use_birdview:
             image, image_path, (intrinsics, poses) = get_birdview_image(self.birdview_path, scene_id)
 
@@ -1556,12 +1226,6 @@ class VisualInstructionTuningDataset3D(Dataset, PointCloudProcessMixin, LogDatas
             image, image_path, (intrinsics, poses) = self.image_getter(
                 self.views_path, self.i2t, scene_id, target_id
             )
-            # image, image_path = self.image_getter(self.views_path, self.i2t, scene_id, object_id)
-        # elif self.name in [
-        #     "scanrefer",
-        #     "scanrefer-nr3d",
-        #     "scanrefer-sr3d",
-        # ]:
         elif "scanrefer" in self.name:
             image, image_path, (intrinsics, poses) = self.image_getter(
                 self.views_path, self.i2t, scanrefer_id
@@ -1608,22 +1272,6 @@ class VisualInstructionTuningDataset3D(Dataset, PointCloudProcessMixin, LogDatas
             target_bbox[:3] -= mesh_vertice_min  #
 
         target_corners = get_3d_box(target_bbox[3:6], 0, target_bbox[0:3])
-        # target_bbox_minmax = get_minmax_corners(target_corners)
-        # target_bbox_minmax = np.round(target_bbox_minmax * SCALE_DETECTION).astype(np.int32)
-        # # (x1, y1, z1, x2, y2, z2)
-        # # x100 and round to int
-        # target_bbox_int = np.round(target_bbox * SCALE_DETECTION).astype(np.int32)
-        # # target_bbox_int = target_bbox
-        # # target_bbox_text = f"[{target_bbox[0]:.3f}, {target_bbox[1]:.3f}, {target_bbox[2]:.3f}, {target_bbox[3]:.3f}, {target_bbox[4]:.3f}, {target_bbox[5]:.3f}]"
-        # # target_bbox_text = f"[{target_bbox_int[0]}, {target_bbox_int[1]}, {target_bbox_int[2]}, {target_bbox_int[3]}, {target_bbox_int[4]}, {target_bbox_int[5]}]"
-        # # <X> <Y> <Z> <H> <W> <L>
-        # # target_bbox_text = " ".join([f"<{x}>" for x in target_bbox_int])
-        # # target_bbox_text = ",".join([f"{x:.2f}" for x in target_bbox_int])
-        # target_bbox_text = ",".join([f"{x}" for x in target_bbox_int])
-        # target_bbox_text = f"[{target_bbox_text}]"
-        # target_bbox_min_text = ",".join([f"{x}" for x in target_bbox_minmax[:3]])
-        # target_bbox_max_text = ",".join([f"{x}" for x in target_bbox_minmax[3:]])
-        # target_bbox_text = f"({target_bbox_min_text}) ({target_bbox_max_text})"
 
         if self.scale_bbox > 0:
             # print(self.scale_bbox)
@@ -1672,11 +1320,6 @@ class VisualInstructionTuningDataset3D(Dataset, PointCloudProcessMixin, LogDatas
             target = target_instruction
 
         
-        # ic(point_cloud.shape, instance_labels.shape, semantic_labels.shape)
-        # ic(point_cloud[:, 3:].max(), point_cloud[:, 3:].min())
-
-        
-
         return {
             # 2D instruction, image, target
             "question_id": question_id,
@@ -2038,19 +1681,6 @@ class Scan2CapSimpleDataset(VisualInstructionTuningDataset3D):
             logger.info(
                 f"Using {dataset_name} style prompt for {self.name}-{self.split} dataset."
             )
-            # if self.use_no_location_text:
-            #     logger.info("Using no-location text style.")
-            #     if self.use_no_dataset_name:
-            #         self.prompt = [
-            #             f"Describe the object in detail at given location in the room.\n",
-            #             f"Describe the {{object_name}} in detail at given location in the room.\n",
-            #         ]
-            #     else:
-            #         self.prompt = [
-            #             f"In {dataset_name} style, describe the object in detail at given location in the room.\n",
-            #             f"In {dataset_name} style, describe the {{object_name}} in detail at given location in the room.\n",
-            #         ]
-            # else:
             if self.use_no_dataset_name:
                 self.prompt = [
                     f"Describe the object in detail at {{location}} in the room.\n",
@@ -2119,11 +1749,6 @@ class Scan2CapSimpleDataset(VisualInstructionTuningDataset3D):
             self.instruction_keys.append("object_index")
 
 
-        # TODO: how to find the image for a bounding box?
-        # self.image_getter = (
-        #     get_scan2cap_image_for_instruction if image_getter is None else image_getter
-        # )
-        # self.image_getter = kwargs.get("image_getter", get_scan2cap_image_for_instruction)
         self.image_getter = get_scan2cap_image_for_instruction
         self.prepare_corpus()
 
@@ -2157,9 +1782,7 @@ class Scan2CapSimpleDataset(VisualInstructionTuningDataset3D):
             "val": f"{SVC_PATH}/scanrefer/ScanRefer_filtered_val.json",
         }
         DSET_PATH_NR3D = {
-            # "train": "/scratch2/generalvision/yangdejie/data/referit3d/annotations/splits/nr3d_train.json",
             "train": f"{SVC_PATH}/Nr3D/nr3d_train.json",
-            # "val": "/scratch2/generalvision/yangdejie/data/referit3d/annotations/splits/nr3d_val.json",
             "val": f"{SVC_PATH}/Nr3D/nr3d_val.json",
             "test": f"{SVC_PATH}/Nr3D/nr3d_test.json",
         }
@@ -2246,10 +1869,6 @@ class Scan2CapTestDataset(Scan2CapSimpleDataset):
         ratio: float,
         **kwargs,
     ):
-        # self.bbox_file = bbox_file
-        # self.add_dummy_caption = add_dummy_caption
-        # self.use_gt_bbox = use_gt_bbox
-
         self.bbox_file = kwargs.get("bbox_file")
         self.add_dummy_caption = kwargs.get("add_dummy_caption", True)
         self.use_gt_bbox = kwargs.get("use_gt_bbox")
@@ -2274,17 +1893,6 @@ class Scan2CapTestDataset(Scan2CapSimpleDataset):
                 f"Using {dataset_name} style prompt for {self.name}-{self.split} dataset."
             )
 
-            # if self.use_no_location_text:
-            #     logger.info("Using no-location text style.")
-            #     if self.use_no_dataset_name:
-            #         self.prompt = [
-            #             f"Describe the object in detail at given location in the room.\n",
-            #         ]
-            #     else:
-            #         self.prompt = [
-            #             f"In {dataset_name} style, describe the object in detail at given location in the room.\n",
-            #         ]
-            # else:
             if self.use_no_dataset_name:
                 self.prompt = [
                     f"Describe the object in detail at {{location}} in the room.\n",
@@ -2346,9 +1954,6 @@ class Scan2CapTestDataset(Scan2CapSimpleDataset):
             self.scene_data[scene_id]["mesh_vertices"] = np.load(
                 os.path.join(scene_path, scene_id) + "_aligned_vert.npy"
             )  # axis-aligned
-            # self.scene_data[scene_id]['instance_labels'] = np.load(os.path.join(scene_path, scene_id)+'_ins_label.npy')
-            # self.scene_data[scene_id]['semantic_labels'] = np.load(os.path.join(scene_path, scene_id)+'_sem_label.npy')
-            # self.scene_data[scene_id]['instance_bboxes'] = np.load(os.path.join(scene_path, scene_id)+'_aligned_bbox.npy')
             bbox_data = all_bbox_data[scene_id]  # {bbox_id : {"bbox": bbox, ...}}
             bboxes = np.zeros((len(bbox_data), 7), dtype=np.float32)
             for bbox_id, bbox in bbox_data.items():
@@ -2356,12 +1961,6 @@ class Scan2CapTestDataset(Scan2CapSimpleDataset):
                 bboxes[int(bbox_id)][-1] = int(bbox_id)
 
             self.scene_data[scene_id]["instance_bboxes"] = bboxes
-            # add a dummy instance id
-            # self.scene_data[scene_id]['instance_bboxes'] = np.concatenate([
-            #     self.scene_data[scene_id]['instance_bboxes'],
-            #     np.arange(self.scene_data[scene_id]['instance_bboxes'].shape[0]).reshape(-1, 1)
-            # ], axis=1)
-
             self.scene_data[scene_id]["instance_bboxes_gt"] = np.load(
                 os.path.join(scene_path, scene_id) + "_aligned_bbox.npy"
             )
@@ -2473,10 +2072,6 @@ class Scan2CapTestDataset(Scan2CapSimpleDataset):
                             predictions_corpus[scene_id][str(pred_id)]
                         )
                         accepted_iou += 1
-                    # else:
-                    #     # # add unmatched gt
-                    #     # if self.add_dummy_caption:
-                    #     #     pred_scene_id_to_object_id_to_caption[scene_id][gt_object_id] = [dummy_caption]
 
             accepted_rate = accepted_iou / used_gts if used_gts > 0 else 0
             logger.info(
@@ -2604,18 +2199,8 @@ class Scan2ObjectNameDataset(Scan2CapSimpleDataset):
         )
 
         # set ScanRefer-specific parameters
-        # self.prompt = "" # TODO: refactor dataset annotation, to include target bbox in the annotation
-        # if prompt is None:
         if kwargs.get("prompt", None) is None:
             postfix = "\x04 {object_name}" + f"{self.prompt_end_token}"
-            # if self.use_no_location_text:
-            #     logger.info("Using no-location text style.")
-            #     self.prompt = [
-            #         "The short name of object at given location in the room is:\n",
-            #         "Describe the the short name of object at given location in the room.\n",
-            #         "Give the short name of object at given location in the room:\n",
-            #     ]
-            # else:
             self.prompt = [
                 # "Describe the object at {location} in the 3D scene. ",
                 # "In the 3D scene, describe the object at {location}. ",
@@ -2653,21 +2238,19 @@ class Scan2ObjectNameDataset(Scan2CapSimpleDataset):
 
     def load_merged_annotation(self):
         DSET_PATH_SCANREFER = {
-            "test": "/scratch2/generalvision/yangdejie/data/ScanRefer_filtered_test.json",
-            "train": "/scratch2/generalvision/yangdejie/data/ScanRefer_filtered_train.json",
-            "val": "/scratch2/generalvision/yangdejie/data/ScanRefer_filtered_val.json",
+            "test": f"{SVC_PATH}/scanrefer/ScanRefer_filtered_test.json",
+            "train": f"{SVC_PATH}/scanrefer/ScanRefer_filtered_train.json",
+            "val": f"{SVC_PATH}/scanrefer/ScanRefer_filtered_val.json",
         }
         DSET_PATH_NR3D = {
-            # "train": "/scratch2/generalvision/yangdejie/data/referit3d/annotations/splits/nr3d_train.json",
-            "train": "/scratch/generalvision/mowentao/ScanQA/LL3DA-main/data/Nr3D/nr3d_train.json",
-            # "val": "/scratch2/generalvision/yangdejie/data/referit3d/annotations/splits/nr3d_val.json",
-            "val": "/scratch/generalvision/mowentao/ScanQA/LL3DA-main/data/Nr3D/nr3d_val.json",
-            "test": "/scratch2/generalvision/yangdejie/data/referit3d/annotations/splits/nr3d_test.json",
+            "train": f"{SVC_PATH}/Nr3D/nr3d_train.json",
+            "val": f"{SVC_PATH}/Nr3D/nr3d_val.json",
+            "test": f"{SVC_PATH}/Nr3D/nr3d_test.json",
         }
         DSET_PATH_SR3D = {
-            "train": "/scratch2/generalvision/yangdejie/data/referit3d/annotations/splits/sr3d_train.json",
-            "val": "/scratch2/generalvision/yangdejie/data/referit3d/annotations/splits/sr3d_val.json",
-            "test": "/scratch2/generalvision/yangdejie/data/referit3d/annotations/splits/sr3d_test.json",
+            "train": f"{SVC_PATH}/Sr3D/sr3d_train.json",
+            "val": f"{SVC_PATH}/Sr3D/sr3d_val.json",
+            "test": f"{SVC_PATH}/Sr3D/sr3d_test.json",
         }
 
         # load train annotations
@@ -2700,17 +2283,8 @@ class ScanQADatasetUnified(VisualInstructionTuningDataset3D):
         )
 
         # set ScanRefer-specific parameters
-        # self.prompt = "" # TODO: refactor dataset annotation, to include target bbox in the annotation
-        # if prompt is None:
         if kwargs.get("prompt", None) is None:
             postfix = "\x04 {answer}" + f"{self.prompt_end_token}"
-            # self.prompt = [
-            #     (
-            #         "Answer the following ScanQA question based on the image and the room:{question}\n"
-            #         if "scanqa" in self.name
-            #         else "Currently my situation: {situation} Answer the following SQA3D question based on the situation, image and the room:{question}\n"
-            #     ),
-            # ]
             if "scanqa-mv" in self.name:
                 self.prompt = [
                     "Answer the following Multi-view ScanQA question based on the image and the room:{question}\n",
@@ -2733,7 +2307,6 @@ class ScanQADatasetUnified(VisualInstructionTuningDataset3D):
 
         self.instruction_keys = ["question", "answers", "situation"]
         self.instruction_keys_for_prompt = ["question", "situation"]
-        # self.image_getter = get_scanqa_image_for_question if image_getter is None else image_getter
         self.image_getter = kwargs.get("image_getter", None)
         if self.image_getter is None:
             if "scanqa-mv" in self.name:
@@ -2865,150 +2438,6 @@ class OpenEndedQADataset(ScanQADatasetUnified):
             self.prompt = [prompt + postfix for prompt in self.prompt]
 
 
-class ScanNetDataset(VisualInstructionTuningDataset3D):
-    """
-    Detection dataset for ScanNet
-    prompt ~= find all objects in the 3D scene with its xyzhwl location
-    """
-
-    def __init__(
-        self,
-        name: str,
-        split: str,
-        ratio: float,
-        **kwargs,
-    ):
-        super().__init__(
-            name,
-            split,
-            ratio,
-            **kwargs,
-        )
-
-        # set ScanRefer-specific parameters
-        # self.prompt = "" # TODO: refactor dataset annotation, to include target bbox in the annotation
-        if kwargs.get("prompt", None) is None:
-            postfix = "\x04 {location}" + f"{self.prompt_end_token}"
-            self.prompt = [
-                "Find all objects in the 3D scene. Location: ",
-                "In the 3D scene, find all objects. Location: ",
-                "The xyzhwl locations of all objects in the 3D scene is: ",
-            ]
-            self.prompt = [prompt + postfix for prompt in self.prompt]
-
-        self.instruction_keys = ["locations"]
-        # TODO: how to find the image for detection?
-        self.image_getter = (
-            get_scanrefer_image_for_instruction if image_getter is None else image_getter
-        )
-
-    def get_annotation_file(split="train") -> str:
-        raise NotImplementedError("ScanNet detection dataset is not implemented yet")
-
-    def __getitem__(self, scene_id):
-        # get instruction, image, bboxes
-        # question_id = self.annotation[idx]["question_id"]
-        data_type = self.name
-        split = self.split
-        idx = scene_id
-        # scene_id = self.annotation[idx]["scene_id"]
-        # ann_id = self.annotation[idx].get("ann_id", "-1")
-        question_id = f"{scene_id}"
-
-        image = self.image_getter(self.views_path, self.i2t, question_id, scene_id)
-
-        # get scene data -- adapted from ScanQA
-        mesh_vertices = self.scene_data[scene_id][
-            "mesh_vertices"
-        ].copy()  # supposedly (50000, 9), xyz, rgb, normal
-        instance_labels = self.scene_data[scene_id]["instance_labels"].copy()
-        semantic_labels = self.scene_data[scene_id]["semantic_labels"].copy()
-        instance_bboxes = self.scene_data[scene_id]["instance_bboxes"].copy()  # xyzhwl
-
-        # original_point_cloud = mesh_vertices[:,0:3]
-        # color -> normal -> (multiview) -> height
-        if not self.use_color:
-            point_cloud = mesh_vertices[:, 0:3]
-            pcl_color = mesh_vertices[:, 3:6]
-        else:
-            point_cloud = mesh_vertices[:, 0:6]
-            # point_cloud[:,3:6] = (point_cloud[:,3:6]-MEAN_COLOR_RGB)/256.0
-            point_cloud[:, 3:6] = point_cloud[:, 3:6] / 256.0
-            pcl_color = point_cloud[:, 3:6]
-
-        if self.use_normal:
-            normals = mesh_vertices[:, 6:9]
-            point_cloud = np.concatenate([point_cloud, normals], 1)  # p (50000, 7)
-
-        if self.use_height:
-            floor_height = np.percentile(point_cloud[:, 2], 0.99)
-            height = point_cloud[:, 2] - floor_height
-            point_cloud = np.concatenate([point_cloud, np.expand_dims(height, 1)], 1)
-
-        # load multiview database
-        if self.use_multiview:
-            enet_feats_file = os.path.join(self.get_multiview_path(), scene_id) + ".pkl"
-            multiview = pickle.load(open(enet_feats_file, "rb"))
-            point_cloud = np.concatenate([point_cloud, multiview], 1)  # p (50000, 135)
-
-        point_cloud, choices = random_sampling(
-            point_cloud, self.num_points, return_choices=True
-        )
-        instance_labels = instance_labels[choices]
-        semantic_labels = semantic_labels[choices]
-        pcl_color = pcl_color[choices]
-
-        if self.use_augment and self.split == "train":
-            point_cloud, factor, rot_mat, flip_x, flip_y = self._augment_pc(point_cloud)
-        else:
-            factor = [0, 0, 0]
-            rot_mat = np.eye(3)
-            flip_x = 1
-            flip_y = 1
-
-        # get target bbox location, if needed
-        instructions = {
-            key: self.annotation[idx][key] if key in self.annotation else ""
-            for key in self.instruction_keys
-        }
-        prompt = self.prompt if isinstance(self.prompt, str) else np.random.choice(self.prompt)
-        target = prompt.format(**instructions)
-        if self.split != "train":
-            target = target.split("\x04")[
-                0
-            ]  # remove template for predictions (to generate predictions)
-
-        # ic(point_cloud.shape, instance_labels.shape, semantic_labels.shape)
-        # ic(point_cloud[:, 3:].max(), point_cloud[:, 3:].min())
-
-        # Minkowski Engine
-        coords, feats, labels = ME.utils.sparse_quantize(
-            coordinates=point_cloud[:, :3],
-            # features=self.normalize_color(point_cloud[:, 3:], is_color_in_range_0_255=True), # FIXME: is this correct?
-            features=self.normalize_color(
-                point_cloud[:, 3:], is_color_in_range_0_255=True
-            ),  # FIXME: is this correct?
-            labels=semantic_labels,
-            quantization_size=self.quantization_size,
-            ignore_label=-100,
-        )
-
-        return {
-            # 2D instruction, image, target
-            "question_id": question_id,
-            "scene_id": scene_id,
-            "image": image,
-            "target": target,
-            "data_type": data_type,
-            **instructions,
-            # 3D
-            "coords": coords,
-            "feats": feats,
-            "labels": labels,
-            "split": split,
-        }
-
-
 class SceneCaptionDataset(VisualInstructionTuningDataset3D):
     """
     Scene caption dataset
@@ -3030,8 +2459,6 @@ class SceneCaptionDataset(VisualInstructionTuningDataset3D):
         )
 
         # set ScanRefer-specific parameters
-        # self.prompt = "" # TODO: refactor dataset annotation, to include target bbox in the annotation
-        # if prompt is None:
         if kwargs.get("prompt", None) is None:
             postfix = "\x04 {description}" + f"{self.prompt_end_token}"
             self.prompt = [

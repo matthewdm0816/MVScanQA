@@ -29,13 +29,12 @@ from utils.pc_utils import random_sampling, rotx, roty, rotz
 import pickle
 import MinkowskiEngine as ME
 from icecream import ic
-from models.fuyu_3d import Fuyu3DCausalLMv2, LLM3DCausalLM, LLM3DProcessorWrapper
+from models.fuyu_3d import Fuyu3DCausalLMv2
 from collections import OrderedDict
 import pretty_errors
 import uuid
 from fuyu_utils import (
     get_optimizer_param_groups_by_names_dict, 
-    ScanQASQA3DDataset, 
     random_sampling, 
     rotx, 
     roty, 
@@ -256,76 +255,40 @@ def get_model(args):
 
     logger.info(f"Using {in_channels} channels for 3D data.")
 
-    # if args.use_3d:
-    if args.use_llm:
-        # modify lora target modules
-        args.lora_target_modules = "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj"
+    model_id = "adept/fuyu-8b"
+    processor = FuyuProcessor.from_pretrained(model_id)
+    tokenizer = processor.tokenizer
+    tokenizer.pad_token = tokenizer.eos_token # |ENDOFTEXT|
+    model = Fuyu3DCausalLMv2(
+        pretrained_args={
+            "pretrained_model_name_or_path": model_id,
+            "torch_dtype": torch.bfloat16,
+        },
+        mnet_path="/scratch/generalvision/mowentao/ScanQA/weights.pth",
+        pnpp_path="/scratch/generalvision/mowentao/SQA3D/ScanQA/outputs/2023-06-10_00-11-47_AUXI/model_last.pth",
+        vote2cap_detr_path="/scratch/generalvision/mowentao/ScanQA/LL3DA-main/pretrained/vote2cap-detr/scannet_vote2cap_detr_XYZ_COLOR_NORMAL.pth",
+        freeze_mnet=args.lr_3d <= 1e-8,
+        freeze_pnpp=args.lr_3d <= 1e-8,
+        freeze_vote2cap_detr=args.lr_3d <= 1e-8,
+        spatial_patch_size=args.spatial_patch_size,
+        pooling_method=args.pooling_method,
+        in_channels=in_channels,
+        num_think_tokens=args.num_think_tokens,
+        use_focus_bbox=args.use_focus_bbox,
+        adapter_type=args.adapter_type,
+        pc_tokenizer_type=args.pc_tokenizer_type,
+        num_query_tokens=args.num_query_tokens,
+        qformer_num_hidden_layers=args.qformer_num_hidden_layers,
+        pretrained_qformer=args.pretrained_qformer if args.use_pretrained_qformer else None,
+        vote2cap_return_type=args.vote2cap_return_type,
+        use_2d=not args.not_use_2d,
+        use_3d=not args.not_use_3d,
+        predict_frame_params=args.predict_frame_params,
+        coeff_frame_params=args.coeff_frame_params,
+        frozen_in_channels=args.frozen_in_channels,
+        merged_frozen_in_channels=args.merged_frozen_in_channels,
+    )
 
-        tokenizer = AutoTokenizer.from_pretrained(args.llm_model_id)
-        tokenizer.pad_token = tokenizer.eos_token
-        processor = LLM3DProcessorWrapper(tokenizer)
-        model = LLM3DCausalLM(
-            llm_type="mistral",
-            model_id=args.llm_model_id,
-            mnet_path="/scratch/generalvision/mowentao/ScanQA/weights.pth",
-            pnpp_path="/scratch/generalvision/mowentao/SQA3D/ScanQA/outputs/2023-06-10_00-11-47_AUXI/model_last.pth",
-            vote2cap_detr_path="/scratch/generalvision/mowentao/ScanQA/LL3DA-main/pretrained/vote2cap-detr/scannet_vote2cap_detr_XYZ_COLOR_NORMAL.pth",
-            freeze_mnet=args.lr_3d <= 1e-8,
-            freeze_pnpp=args.lr_3d <= 1e-8,
-            freeze_vote2cap_detr=args.lr_3d <= 1e-8,
-            spatial_patch_size=args.spatial_patch_size,
-            pooling_method=args.pooling_method,
-            in_channels=in_channels,
-            use_focus_bbox=args.use_focus_bbox,
-            adapter_type=args.adapter_type,
-            pc_tokenizer_type=args.pc_tokenizer_type,
-            num_query_tokens=args.num_query_tokens,
-            qformer_num_hidden_layers=args.qformer_num_hidden_layers,
-            pretrained_qformer=args.pretrained_qformer if args.use_pretrained_qformer else None,
-            vote2cap_return_type=args.vote2cap_return_type,
-            frozen_in_channels=args.frozen_in_channels,
-            merged_frozen_in_channels=args.merged_frozen_in_channels,
-        )
-    else:
-        model_id = "adept/fuyu-8b"
-        processor = FuyuProcessor.from_pretrained(model_id)
-        tokenizer = processor.tokenizer
-        tokenizer.pad_token = tokenizer.eos_token # |ENDOFTEXT|
-        model = Fuyu3DCausalLMv2(
-            pretrained_args={
-                "pretrained_model_name_or_path": model_id,
-                "torch_dtype": torch.bfloat16,
-            },
-            mnet_path="/scratch/generalvision/mowentao/ScanQA/weights.pth",
-            pnpp_path="/scratch/generalvision/mowentao/SQA3D/ScanQA/outputs/2023-06-10_00-11-47_AUXI/model_last.pth",
-            vote2cap_detr_path="/scratch/generalvision/mowentao/ScanQA/LL3DA-main/pretrained/vote2cap-detr/scannet_vote2cap_detr_XYZ_COLOR_NORMAL.pth",
-            freeze_mnet=args.lr_3d <= 1e-8,
-            freeze_pnpp=args.lr_3d <= 1e-8,
-            freeze_vote2cap_detr=args.lr_3d <= 1e-8,
-            spatial_patch_size=args.spatial_patch_size,
-            pooling_method=args.pooling_method,
-            in_channels=in_channels,
-            num_think_tokens=args.num_think_tokens,
-            use_focus_bbox=args.use_focus_bbox,
-            adapter_type=args.adapter_type,
-            pc_tokenizer_type=args.pc_tokenizer_type,
-            num_query_tokens=args.num_query_tokens,
-            qformer_num_hidden_layers=args.qformer_num_hidden_layers,
-            pretrained_qformer=args.pretrained_qformer if args.use_pretrained_qformer else None,
-            vote2cap_return_type=args.vote2cap_return_type,
-            use_2d=not args.not_use_2d,
-            use_3d=not args.not_use_3d,
-            predict_frame_params=args.predict_frame_params,
-            coeff_frame_params=args.coeff_frame_params,
-            frozen_in_channels=args.frozen_in_channels,
-            merged_frozen_in_channels=args.merged_frozen_in_channels,
-        )
-    # model.to_bfloat16()
-
-    # show all param precision
-    # if args.accelerator.is_local_main_process:
-    #     for name, param in model.named_parameters():
-    #         print(name, param.dtype)
 
     if not args.detector_from_scratch:
         model.load_detector()
@@ -333,11 +296,6 @@ def get_model(args):
     if args.checkpoint_path != "":
         logger.info(f"Loading checkpoint from {args.checkpoint_path}...")
         model.load_pretrained(args.checkpoint_path)
-    # else:
-    #     model = FuyuForCausalLM.from_pretrained(
-    #         model_id, 
-    #         torch_dtype=torch.bfloat16,
-    #     )
     return model, processor 
 
 def get_peft_fuyu(model, args):

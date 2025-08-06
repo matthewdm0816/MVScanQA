@@ -75,21 +75,10 @@ from collections import namedtuple
 import inspect
 
 import logging
+
+
 logger = logging.getLogger(__name__)
-# average_meter = AverageMeter(report_period=10, print_fn=lambda *args: print(*args) if dist.get_rank() == 0 else None) # use lazy print as distributed might not init yet
-
 average_meter = AverageMeter(report_period=10, print_fn=print)
-
-
-# def print_once(message):
-#     # if not hasattr(print_once, "printed"):
-#     #     print_once.printed = True
-#     #     print(message)
-#     if not hasattr(print_once, "printed"):
-#         print_once.printed = set()
-#     if message not in print_once.printed:
-#         print_once.printed.add(message)
-#         print(message)
 
 def trim_objects(out, coords_mask, predicted_bbox_corners):
     # according to coords_mask, trim the objects
@@ -442,29 +431,6 @@ class PCTokenizerAdapterMixin:
                 nn.GELU(),
                 nn.Linear(self.config.hidden_size, self.config.hidden_size),
             )
-        # elif adapter_type == "mixed-ffn":
-        #     # self.linear_3d = nn.Sequential(
-        #     #     nn.LayerNorm(self.config.out_channels_mnet),
-        #     #     nn.Linear(self.config.out_channels_mnet, self.config.hidden_size),
-        #     #     nn.GELU(),
-        #     #     nn.Dropout(0.1),
-        #     #     nn.Linear(self.config.hidden_size, self.config.hidden_size),
-        #     # )
-        #     assert isinstance(self.config.out_channels_mnet, list), "out_channels_mnet must be a list"
-        #     self.linear_3d = nn.ModuleList([
-        #             nn.Sequential(
-        #             nn.LayerNorm(d),
-        #             nn.Linear(d, self.config.hidden_size),
-        #             nn.GELU(),
-        #             nn.Dropout(0.1),
-        #             nn.Linear(self.config.hidden_size, self.config.hidden_size),
-        #         ) for d in self.config.out_channels_mnet
-        #     ])
-        #     self.linear_focus_bbox = nn.Sequential(
-        #         nn.Linear(6, self.config.hidden_size),
-        #         nn.GELU(),
-        #         nn.Linear(self.config.hidden_size, self.config.hidden_size),
-        #     )
         elif adapter_type == "linear":
             # self.linear_3d = nn.Linear(out_channels_mnet + 3, self.config.hidden_size)
             self.linear_3d = nn.Linear(self.config.out_channels_mnet, self.config.hidden_size)
@@ -611,18 +577,7 @@ class Fuyu3DCausalLMv2(FuyuPreTrainedModel, PCTokenizerAdapterMixin):
         self.config.use_2d = kwargs.get("use_2d", True)
         self.config.use_3d = kwargs.get("use_3d", True)
 
-        self.config.predict_frame_params = kwargs.get("predict_frame_params", False)
         self.config.coeff_frame_params = kwargs.get("coeff_frame_params", 0.1)
-        if self.config.predict_frame_params:
-        # 2x4x4 for camera intrinsics, pose | axis alignments as input
-            # self.frame_params_head = nn.Sequential(
-            #     nn.Linear(self.config.hidden_size + 4*4, self.config.hidden_size * 4),
-            #     nn.GELU(),
-            #     nn.Linear(self.config.hidden_size * 4, self.config.hidden_size),
-            #     nn.GELU(),
-            #     nn.Linear(self.config.hidden_size, 2*4*4),
-            # )
-            self.frame_params_head = nn.Linear(self.config.hidden_size + 4*4, 2*4*4)
         
         ## 2D & 3D MASK SETTINGs
         self.config.p_drop_2d = kwargs.get("p_drop_2d", 0.0) # prob to drop ALL 2D tokens
@@ -635,15 +590,8 @@ class Fuyu3DCausalLMv2(FuyuPreTrainedModel, PCTokenizerAdapterMixin):
 
         self.related_object_embedding = nn.Parameter(torch.zeros(1, self.config.hidden_size))
         nn.init.kaiming_normal_(self.related_object_embedding)
-        # self.related_object_mlp = nn.Sequential(
-        #     nn.Linear(self.config.hidden_size, self.config.hidden_size),
-        #     nn.GELU(),
-        #     nn.Linear(self.config.hidden_size, self.config.hidden_size),
-        # )
         self.related_object_mlp = nn.Sequential(
             nn.Linear(self.config.hidden_size, self.config.out_channels_mnet),
-            # nn.GELU(),
-            # nn.Linear(self.config.out_channels_mnet * 2, self.config.out_channels_mnet),
         )
 
         self.config.choose_related_object = kwargs.get("choose_related_object", False)
@@ -662,10 +610,7 @@ class Fuyu3DCausalLMv2(FuyuPreTrainedModel, PCTokenizerAdapterMixin):
         self.config.use_object_index_embedding = kwargs.get("use_object_index_embedding", False)
         if self.config.use_object_index_embedding:
             assert self.config.trim_objects, "we assume objects are no-masked starting from 0 to some N"
-            # init object index embedding
             self.object_index_embedding = nn.Embedding(512, self.config.hidden_size)
-            # nn.init.kaiming_normal_(self.object_index_embedding.weight, nonlinearity='linear')
-            # nn.init.normal_(self.object_index_embedding.weight, mean=0.0, std=0.1)
             self.fuyu.language_model.resize_token_embeddings(len(self.text_tokenizer))
 
         self.config.use_object_textual_index = kwargs.get("use_object_textual_index", False)
@@ -1101,38 +1046,11 @@ class Fuyu3DCausalLMv2(FuyuPreTrainedModel, PCTokenizerAdapterMixin):
                 beam_size = input_ids.shape[0] // coords_mask.shape[0]
                 print_once(f"Beam search detected in later tokens, {beam_size=}")
 
-            # out = None
-            # make deepspeed zero3 stage happy: avoid unused parameter
-            # --- these computation is pure useless
-            # out = torch.zeros(1, 1, self.config.out_channels_mnet, dtype=torch.float32, device=input_ids.device)
-            # linear_3d_weight_dtype = self.linear_3d[0].weight.dtype if isinstance(self.linear_3d, nn.Sequential) else self.linear_3d.weight.dtype
-            # if out.dtype != linear_3d_weight_dtype:
-            #     out = out.to(self.linear_3d[0].weight.dtype) # sometimes autocast does not work in inference stage
-
-            # out = self.linear_3d(out)
-            # if self.use_focus_bbox:
-            #     if focus_bbox is None:
-            #         focus_bbox = torch.zeros(out.shape[0], 1, 6, dtype=out.dtype, device=out.device)
-                
-            #     focus_bbox = self.linear_focus_bbox(focus_bbox.to(out.dtype))
-            # --- end of useless computation
             out = None
             
-            # NOTE: this does not work for beam-search!!!
-            # ic(coords_mask.shape, len_scene_embeddings)
-            # ic("No 3D scene encoding is used, this should be in the generation stage, at step > 1")
-
-        # detect beam search (in this occasion, mnet_inputs is for one batch only, while input_ids is duplicated for beam search)
-        # and pad coords_mask and out accordingly
-        # if is_in_beam_search:
-        #     coords_mask = coords_mask.repeat_interleave(beam_size, dim=0)
-        
 
         # Fuyu LVLM
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        # output_hidden_states = (
-        #     output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        # )
         output_hidden_states = True # always output hidden states for now
         use_cache = use_cache if use_cache is not None else self.config.use_cache
 
@@ -1294,13 +1212,6 @@ class Fuyu3DCausalLMv2(FuyuPreTrainedModel, PCTokenizerAdapterMixin):
                     average_meter.update('correct', correct, type="integer")
                     average_meter.update('total', total, type="integer")
                     average_meter.update('token_acc', token_acc, type="percent")
-                # loss = loss.view(_label_shape[0], -1) # [B, N]
-                # # unmasked_tokens = (labels != -100).sum(dim=-1)
-                # # sum through tokens, mean through batch
-                # loss = loss.sum(dim=-1).mean()
-                # print(loss)
-
-            
 
         if self.config.use_grounding_classifier and scene_embed_mask is not None:
             # NOTE: after 1st step generation, scene_embed_mask is already inserted and None
@@ -1433,58 +1344,6 @@ class Fuyu3DCausalLMv2(FuyuPreTrainedModel, PCTokenizerAdapterMixin):
             grounding_acc_softmax = 0.0
 
 
-        if self.config.predict_frame_params and frame_poses is not None and frame_intrinsics is not None:
-            # frame_params_mask ~ those frame_poses not I(4) 
-            last_hidden_state = outputs.hidden_states[-1] # [B, L, H]
-            # logger.info(f"last_hidden_state: {last_hidden_state.shape}")
-
-            frame_params_mask = (frame_poses != torch.eye(4, device=last_hidden_state.device).unsqueeze(0)).any(dim=-1).any(dim=-1)
-            total_frame_params = frame_params_mask.sum() # total samples to predict frame parameters
-            # logger.info(f"frame_params_mask: {total_frame_params} / {frame_params_mask.shape[0]}")
-            if total_frame_params == 0:
-                loss_frame = torch.tensor(0.0).to(last_hidden_state)
-                loss_frame_scene = torch.tensor(0.0).to(last_hidden_state)
-                predicted_frame_pose = torch.eye(4, device=last_hidden_state.device).unsqueeze(0).expand(last_hidden_state.shape[0], -1, -1)
-                predicted_frame_intrinsics = torch.eye(4, device=last_hidden_state.device).unsqueeze(0).expand(last_hidden_state.shape[0], -1, -1)
-                predicted_frame_pose_scene = torch.eye(4, device=last_hidden_state.device).unsqueeze(0).expand(last_hidden_state.shape[0], -1, -1)
-                predicted_frame_intrinsics_scene = torch.eye(4, device=last_hidden_state.device).unsqueeze(0).expand(last_hidden_state.shape[0], -1, -1)
-            else:   
-                # pooled_hidden_state = last_hidden_state.mean(dim=1) # [B, H]
-                # scene_end_position = self.get_image_patch_start_position(image_patches_indices) - 1
-
-                # NOTE: after seeing image (view) and scene, we predict the frame parameters
-                #   note that the tokens are [scene embeddings, image embeddings, word embeddings]
-
-                image_end_position = self.get_image_patch_end_position(image_patches_indices) # [B]
-                image_end_position += len_scene_embeddings + int(self.use_focus_bbox) # add scene embeddings and focus bbox embeddings
-                pooled_hidden_state = last_hidden_state[torch.arange(last_hidden_state.shape[0], device=last_hidden_state.device), image_end_position] # [B, H]
-                axis_alignments = axis_alignments.view(-1, 16) # [B, 4, 4] -> [B, 16]
-                predicted_frame_params = self.frame_params_head(torch.cat((pooled_hidden_state, axis_alignments), dim=-1)) # [B, 2*4*4]
-                predicted_frame_pose = predicted_frame_params[:, :16]
-                predicted_frame_intrinsics = predicted_frame_params[:, 16:]
-
-                loss_fct_params = nn.MSELoss()
-                # loss_fct_params = nn.HuberLoss()
-                loss_frame_pose = loss_fct_params(predicted_frame_pose[frame_params_mask], frame_poses[frame_params_mask].view(-1, 16))
-                loss_frame_intrinsics = loss_fct_params(predicted_frame_intrinsics[frame_params_mask], frame_intrinsics[frame_params_mask].view(-1, 16))
-                loss_frame = loss_frame_pose + loss_frame_intrinsics
-
-                # scene_end_position = self.get_image_patch_start_position(image_patches_indices) - 1 + len_scene_embeddings
-                # pooled_hidden_state_scene = last_hidden_state[torch.arange(last_hidden_state.shape[0], device=last_hidden_state.device), scene_end_position] # [B, H]
-                # predicted_frame_params_scene = self.frame_params_head(torch.cat((pooled_hidden_state_scene, axis_alignments), dim=-1)) # [B, 2*4*4]
-                # predicted_frame_pose_scene = predicted_frame_params_scene[:, :16]
-                # predicted_frame_intrinsics_scene = predicted_frame_params_scene[:, 16:]
-
-                # loss_frame_pose_scene = loss_fct_params(predicted_frame_pose_scene[frame_params_mask], frame_poses[frame_params_mask].view(-1, 16))
-                # loss_frame_intrinsics_scene = loss_fct_params(predicted_frame_intrinsics_scene[frame_params_mask], frame_intrinsics[frame_params_mask].view(-1, 16))
-                # loss_frame_scene = loss_frame_pose_scene + loss_frame_intrinsics_scene
-
-
-            # loss = loss + (loss_frame + loss_frame_scene) * self.config.coeff_frame_params
-            loss = loss + loss_frame * self.config.coeff_frame_params
-
-
-        # print(return_dict)
         if not return_dict:
             # return tuple(v for v in outputs if v is not None)
             outputs =  tuple(v for v in outputs if v is not None)
@@ -1500,14 +1359,6 @@ class Fuyu3DCausalLMv2(FuyuPreTrainedModel, PCTokenizerAdapterMixin):
                 attentions=outputs.attentions,
             )
             outputs = MyObjectDict(outputs.__dict__)
-            if self.config.predict_frame_params and frame_poses is not None and frame_intrinsics is not None:
-                outputs["predicted_frame_pose"] = predicted_frame_pose.view(-1, 4, 4)
-                outputs["predicted_frame_intrinsics"] = predicted_frame_intrinsics.view(-1, 4, 4)
-                outputs["loss_frame"] = loss_frame
-                # outputs["predicted_frame_pose_scene"] = predicted_frame_pose_scene.view(-1, 4, 4)
-                # outputs["predicted_frame_intrinsics_scene"] = predicted_frame_intrinsics_scene.view(-1, 4, 4)
-                # outputs["loss_frame_scene"] = loss_frame_scene
-
             if self.config.use_grounding_classifier:
                 # outputs["grounding_logits"] = grounding_logits
                 outputs["loss_grounding"] = grounding_loss
@@ -1881,412 +1732,4 @@ class Fuyu3DCausalLMv2(FuyuPreTrainedModel, PCTokenizerAdapterMixin):
                 tuple(past_state.index_select(0, beam_idx.to(past_state.device)) for past_state in layer_past),
             )
         return reordered_past
-
-
-class LLM3DProcessorWrapper:
-    def __init__(self, tokenizer):
-        self.tokenizer = tokenizer
-
-    def __call__(self, text, images, padding="max_length", truncation=True, return_tensors="pt", **kwargs):
-        # NOTE: this is a hack to make the processor compatible with the tokenizer
-        #    we ignore the images here, since it is a pure text processor
-        return self.tokenizer(
-            text=text,
-            padding="longest",
-            truncation=truncation,
-            return_tensors=return_tensors,
-            max_length=512,
-            **kwargs,
-        )
-    
-
-
-class LLM3DCausalLM(PreTrainedModel, PCTokenizerAdapterMixin):
-    def __init__(self, **kwargs):
-        llm_type = kwargs.get("llm_type", "mistral")
-        if llm_type == "mistral":
-            config = MistralConfig.from_pretrained(kwargs.get("model_id"))
-        else:
-            raise ValueError(f"Unknown LLM type: {llm_type}")
-        
-        super().__init__(config)
-
-        # print kwargs without vocab
-        print({k: v for k, v in kwargs.items() if k != "vocab"})
-        # self.config = MyObjectDict()
-        
-        self.config.llm_type = kwargs.get("llm_type", "mistral")
-        if self.config.llm_type == "mistral":
-            self.llm = MistralForCausalLM.from_pretrained(kwargs.get("model_id"), torch_dtype=torch.bfloat16)
-        else:
-            raise ValueError(f"Unknown LLM type: {kwargs.get('llm_type')}")
-        
-        self.fuyu = self.llm # alias for the LLM
-        
-        self.config = self.llm.config
-        self.config.iosa_threshold = kwargs.get("iosa_threshold", 0.25)
-
-        # PC tokenizer options
-        self.config.mnet_path = kwargs.get("mnet_path", "/scratch/generalvision/mowentao/ScanQA/weights.pth")
-        self.config.pnpp_path = kwargs.get("pnpp_path", "...")
-        self.config.vote2cap_detr_path = kwargs.get("vote2cap_detr_path", "...")
-        self.config.freeze_vote2cap_detr = kwargs.get("freeze_vote2cap_detr", True)
-        self.config.freeze_mnet = kwargs.get("freeze_mnet", True)
-        self.config.freeze_pnpp = kwargs.get("freeze_pnpp", True)
-
-        pc_tokenizer_type = kwargs.get("pc_tokenizer_type", "minkowski")
-        self.config.pc_tokenizer_type = pc_tokenizer_type
-        self.config.in_channels = kwargs.get("in_channels", 3)
-        self.config.spatial_patch_size = kwargs.get("spatial_patch_size", 24)
-        self.config.pooling_method = kwargs.get("pooling_method", "max")
-        self.config.vote2cap_return_type = kwargs.get("vote2cap_return_type", "enc_features")
-        self.config.frozen_in_channels = kwargs.get("frozen_in_channels", 256)
-        self.config.merged_frozen_in_channels = kwargs.get("merged_frozen_in_channels", [256, 256])
-
-
-        # Adapter options
-        self.config.adapter_type = kwargs.get("adapter_type", "ffn")
-        self.adater_type = self.config.adapter_type
-        self.config.num_query_tokens = kwargs.get("num_query_tokens", 128)
-        self.config.upsample_ratio = kwargs.get("upsample_ratio", 2)
-        self.config.use_focus_bbox = kwargs.get("use_focus_bbox", False)
-        self.config.pretrained_qformer = kwargs.get("pretrained_qformer", None)
-        self.config.qformer_num_hidden_layers = kwargs.get("qformer_num_hidden_layers", 12)
-
-        
-        self._init_pc_tokenizer()
-
-        self._init_adapter()
-        
-        self.use_focus_bbox = kwargs.get("use_focus_bbox", False)
-
-
-    def forward(
-        self,
-        input_ids: torch.LongTensor = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[List[torch.FloatTensor]] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        focus_bbox: Optional[torch.FloatTensor] = None, # [B, 6]
-        focus_bbox_mask: Optional[torch.BoolTensor] = None, # [B]
-        labels: Optional[torch.LongTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-        mnet_inputs: Optional[Tuple] = None, # tuple of (coords, feats)
-        qformer_inputs: Optional[dict] = None, # dict of inputs for qformer from tokenization
-        frame_caption_mask: Optional[torch.BoolTensor] = None, # [B], mask for frame caption - True to mask off non-view objects
-        frame_intrinsics: Optional[torch.FloatTensor] = None, # [B, 4, 4] camera intrinsics
-        frame_poses: Optional[torch.FloatTensor] = None, # [B, 4, 4] camera pose
-        axis_alignments: Optional[torch.FloatTensor] = None, # [B, 4, 4] axis alignments
-        **kwargs, # hack to reduce the need to manually change the code 
-    ) -> Union[Tuple, BaseModelOutputWithPast]:
-        is_in_beam_search = False
-
-        # --- 3D PREFIXES
-        if mnet_inputs is not None:
-            if self.config.pc_tokenizer_type != "frozen":
-                pc_tokenizer_output = self.pc_tokenizer(mnet_inputs)
-            else:
-                pc_tokenizer_output = mnet_inputs
-
-            if len(pc_tokenizer_output) == 2:
-                out, coords_mask = pc_tokenizer_output
-                predicted_bbox_corners = None
-            elif len(pc_tokenizer_output) == 3:
-                out, coords_mask, predicted_bbox_corners = pc_tokenizer_output
-
-            
-
-            is_in_beam_search = input_ids.shape[0] != coords_mask.shape[0]
-            if is_in_beam_search:
-                # NOTE: in Minkowski case, the input SparseTensor can't be automatically expanded
-                #       so we need to repeat the coords_mask and out manually
-                #       in PointNet++ case, the input is auto expanded, so the code will not reach here
-                beam_size = input_ids.shape[0] // coords_mask.shape[0]
-                # print(f"Beam search detected, {beam_size=}")
-
-            
-            linear_3d_weight_dtype = self.linear_3d[0].weight.dtype if isinstance(self.linear_3d, nn.Sequential) else self.linear_3d.weight.dtype
-            if out.dtype != linear_3d_weight_dtype:
-                out = out.to(self.linear_3d[0].weight.dtype) # sometimes autocast does not work in inference stage
-            
-            out = self.linear_3d(out)
-            if self.config.adapter_type == "upsampler":
-                # [B, L, H*upsample_ratio] -> [B, L*upsample_ratio, H]
-                out = out.view(out.shape[0], -1, self.config.hidden_size) # [B, L * upsample_ratio, H]
-                # 0, ..., upsample_ratio-1 ~ 0-th token, mask=coords_mask[..., 0]
-                # upsample_ratio, ..., 2*upsample_ratio-1 ~ 1-th token, mask=coords_mask[..., 1]
-                # thus repeat coords_mask with upsample_ratio times
-
-                coords_mask = coords_mask.repeat_interleave(self.upsample_ratio, dim=1)
-
-            if is_in_beam_search:
-                out = out.repeat_interleave(beam_size, dim=0)
-                coords_mask = coords_mask.repeat_interleave(beam_size, dim=0)
-            
-            if self.use_focus_bbox:
-                if focus_bbox is not None:
-                    focus_bbox = focus_bbox.to(out.dtype).unsqueeze(1)
-                    # maskoff the focus_bbox
-                    if focus_bbox_mask is not None:
-                        coords_mask = torch.cat((coords_mask, focus_bbox_mask.unsqueeze(1).to(coords_mask)), dim=1)
-                    else:
-                        coords_mask = torch.cat((coords_mask, torch.ones(coords_mask.shape[0], 1, dtype=torch.bool, device=coords_mask.device)), dim=1)
-                else:
-                    focus_bbox = torch.zeros(out.shape[0], 1, 6, dtype=out.dtype, device=out.device)
-                    coords_mask = torch.cat((coords_mask, torch.zeros(coords_mask.shape[0], 1, dtype=torch.bool, device=coords_mask.device)), dim=1)
-
-                focus_bbox = self.linear_focus_bbox(focus_bbox)
-                out = torch.cat((out, focus_bbox), dim=1)
-            
-
-            if self.config.adapter_type == "qformer" or self.config.adapter_type == "moe-qformer":
-                # NOTE: DO WE NEED REPEAT_INTERLEAVE HERE?
-                if is_in_beam_search:
-                    # repeat input ids and attention mask
-                    qformer_inputs["input_ids"] = qformer_inputs["input_ids"].repeat_interleave(beam_size, dim=0)
-                    qformer_inputs["attention_mask"] = qformer_inputs["attention_mask"].repeat_interleave(beam_size, dim=0)
-                    # print(out.shape, qformer_inputs["input_ids"].shape, qformer_inputs["attention_mask"].shape)
-
-                # prepare query_attention_mask
-                query_attention_mask = torch.ones(out.shape[0], self.config.num_query_tokens, dtype=torch.bool, device=out.device)
-                query_attention_mask = torch.cat((query_attention_mask, qformer_inputs["attention_mask"]), dim=1)
-
-                out = self.qformer(
-                    # input_ids=None, # TODO: add input_ids
-                    input_ids=qformer_inputs["input_ids"],
-                    attention_mask=query_attention_mask,
-                    query_embeds=self.qformer_query_tokens.expand(out.shape[0], -1, -1),
-                    encoder_hidden_states=out,
-                    encoder_attention_mask=coords_mask,
-                    return_dict=True,
-                ).last_hidden_state
-                out = self.qformer_to_language(out)
-
-                # replace coords_mask as all True
-                coords_mask = torch.ones(*out.shape[:2], dtype=torch.bool, device=out.device)
-            
-
-            # if self.num_think_tokens > 0:
-            #     think_tokens = self.think_tokens.expand(out.shape[0], -1, -1)
-            #     out = torch.cat((out, think_tokens), dim=1)
-            #     coords_mask = torch.cat((coords_mask, torch.ones(coords_mask.shape[0], self.num_think_tokens, dtype=torch.bool, device=coords_mask.device)), dim=1)
-                # len_scene_embeddings += self.num_think_tokens
-            
-            len_scene_embeddings = out.shape[1]
-            self.cached_coords_mask = coords_mask.detach().cpu().clone().numpy() # if in beam search, this is repeated
-            self.cached_len_scene_embeddings = len_scene_embeddings
-        else:
-            coords_mask: np.ndarray = self.cached_coords_mask.copy() # use cached coords mask from previous generation step
-            coords_mask = torch.from_numpy(coords_mask).to(input_ids.device)
-            len_scene_embeddings = self.cached_len_scene_embeddings
-
-            is_in_beam_search = input_ids.shape[0] != coords_mask.shape[0]
-            if is_in_beam_search:
-                beam_size = input_ids.shape[0] // coords_mask.shape[0]
-
-            out = None
-            
-            # NOTE: this does not work for beam-search!!!
-            # ic(coords_mask.shape, len_scene_embeddings)
-            # ic("No 3D scene encoding is used, this should be in the generation stage, at step > 1")
-        # --- END 3D PREFIXES, get `out, coords_mask, len_scene_embeddings`
-        
-        if input_ids is not None and inputs_embeds is not None:
-            raise ValueError("You cannot specify both decoder_input_ids and decoder_inputs_embeds at the same time")
-        elif input_ids is not None:
-            batch_size, seq_length = input_ids.shape
-        elif inputs_embeds is not None:
-            batch_size, seq_length, _ = inputs_embeds.shape
-        else:
-            raise ValueError("You have to specify either decoder_input_ids or decoder_inputs_embeds")
-        
-        # ---- batch x (ntoken + nword) x n_embd
-        if inputs_embeds is None:
-            inputs_embeds = self.llm.get_input_embeddings()(input_ids)
-        attention_mask = attention_mask if attention_mask is not None else torch.ones_like(input_ids, dtype=torch.long)
-        # position_ids = position_ids if position_ids is not None else torch.arange(input_ids.shape[1], device=input_ids.device).unsqueeze(0)
-
-        # logger.info(f"len_scene_embeddings: {len_scene_embeddings}")
-
-        # prepend the 3D scene embeddings
-        if out is not None:
-            # in case of generation after the first step, out is included in past_key_values
-            inputs_embeds = torch.cat((out, inputs_embeds), dim=1)
-        attention_mask = torch.cat((coords_mask, attention_mask), dim=1)
-        # position_ids_scene = torch.arange(len_scene_embeddings, device=input_ids.device).unsqueeze(0).repeat(position_ids.shape[0], 1)
-        # position_ids = torch.cat((
-        #     torch.arange(len_scene_embeddings, device=input_ids.device).unsqueeze(0).repeat(), position_ids), dim=1
-        # )
-        # position_ids = torch.cat((position_ids_scene, position_ids), dim=1)
-        
-        
-        seq_length += len_scene_embeddings # to generate appropriate position_ids including scene embeddings
-        seq_length_with_past = seq_length
-        past_key_values_length = 0
-        if past_key_values is not None:
-            past_key_values_length = past_key_values[0][0].shape[2]
-            seq_length_with_past = seq_length_with_past + past_key_values_length
-
-        if position_ids is None: # training
-            device = input_ids.device if input_ids is not None else inputs_embeds.device
-            position_ids = torch.arange(
-                past_key_values_length, seq_length + past_key_values_length, dtype=torch.long, device=device
-            )
-            position_ids = position_ids.unsqueeze(0)
-        else:
-            # add len_scene_embeddings to position_ids to generate appropriate position_ids including scene embeddings
-            position_ids = position_ids + len_scene_embeddings 
-            # NOTE: only execute when past_key_values is None, otherwise position_ids is already [1] length
-            if past_key_values is None:
-                # position_ids = self.insert_position_ids(
-                #     image_patch_input_indices=image_patches_indices, 
-                #     position_ids=position_ids, 
-                #     len_scene_embeddings=len_scene_embeddings
-                # )
-                position_ids_scene = torch.arange(len_scene_embeddings, device=input_ids.device).unsqueeze(0).repeat(position_ids.shape[0], 1)
-                position_ids = torch.cat((position_ids_scene, position_ids), dim=1)
-
-
-        if labels is not None:
-            labels = torch.cat((torch.full((labels.shape[0], len_scene_embeddings), -100, dtype=torch.long, device=labels.device), labels), dim=1)
-        
-        # logger.info(f"input_ids: {input_ids.shape}, attention_mask: {attention_mask.shape}, position_ids: {position_ids.shape}")
-        
-        # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
-        outputs = self.llm.model(
-            # input_ids=input_ids,
-            attention_mask=attention_mask,
-            position_ids=position_ids,
-            past_key_values=past_key_values,
-            inputs_embeds=inputs_embeds,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-
-        # logger.info(f"outputs: {outputs}")
-
-        hidden_states = outputs[0]
-        logits = self.llm.lm_head(hidden_states)
-        logits = logits.float()
-
-        # logger.info(f"logits: {logits.shape}, labels: {labels.shape if labels is not None else None}")
-
-        loss = None
-        if labels is not None:
-            # Shift so that tokens < n predict n
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
-            # Flatten the tokens
-            loss_fct = nn.CrossEntropyLoss()
-            shift_logits = shift_logits.view(-1, self.config.vocab_size)
-            shift_labels = shift_labels.view(-1)
-            # Enable model parallelism
-            shift_labels = shift_labels.to(shift_logits.device)
-            loss = loss_fct(shift_logits, shift_labels)
-
-        if not return_dict:
-            output = (logits,) + outputs[1:]
-            return (loss,) + output if loss is not None else output
-
-        return CausalLMOutputWithPast(
-            loss=loss,
-            logits=logits,
-            past_key_values=outputs.past_key_values,
-            hidden_states=outputs.hidden_states,
-            attentions=outputs.attentions,
-        )
-    
-    def prepare_inputs_for_generation(
-        self,
-        input_ids,
-        past_key_values=None,
-        attention_mask=None,
-        inputs_embeds=None,
-        # image_patches=None,
-        # image_patches_indices=None,
-        mnet_inputs: Optional[Tuple] = None,
-        qformer_inputs: Optional[dict] = None,
-        **kwargs,
-    ):
-        if past_key_values:
-            input_ids = input_ids[:, -1:]
-
-        position_ids = kwargs.get("position_ids", None)
-        if attention_mask is not None and position_ids is None:
-            # create position_ids on the fly for batch generation
-            # FIXME: how to adapt to scene embeddings?
-            position_ids = attention_mask.long().cumsum(-1) - 1
-            position_ids.masked_fill_(attention_mask == 0, 1)
-            if past_key_values:
-                position_ids = position_ids[:, -1].unsqueeze(-1)
-
-        # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
-        if inputs_embeds is not None and past_key_values is None:
-            model_inputs = {"inputs_embeds": inputs_embeds}
-        else:
-            model_inputs = {"input_ids": input_ids} 
-
-        # also the 3D scene embeddings for the first time
-        if mnet_inputs is not None and past_key_values is None:
-            model_inputs["mnet_inputs"] = mnet_inputs
-
-        if qformer_inputs is not None and past_key_values is None:
-            model_inputs["qformer_inputs"] = qformer_inputs
-        
-
-        # if image_patches_indices is not None:
-        #     model_inputs["image_patches_indices"] = image_patches_indices
-
-        model_inputs.update(
-            {
-                "position_ids": position_ids,
-                "past_key_values": past_key_values,
-                "use_cache": kwargs.get("use_cache"),
-                "attention_mask": attention_mask,
-                # "image_patches_indices": image_patches_indices, # always provide to insert position ids correctly # if past_key_values is None else None,
-                # "image_patches": image_patches if past_key_values is None else None,
-                "focus_bbox": kwargs.get("focus_bbox", None),
-                "target_object_indices": kwargs.get("target_object_indices", None),
-                "related_object_bboxes": kwargs.get("related_object_bboxes", None),
-            }
-        )
-        return model_inputs
-    
-    @staticmethod
-    def _reorder_cache(past_key_values, beam_idx):
-        reordered_past = ()
-        for layer_past in past_key_values:
-            reordered_past += (
-                tuple(past_state.index_select(0, beam_idx.to(past_state.device)) for past_state in layer_past),
-            )
-        return reordered_past
-    
-    def save_pretrained(self, save_directory):
-        # only save lora, if not, the model is frozen.
-        if isinstance(self.fuyu, PeftModel):
-            logger.info("Saving the LoRA.")
-            self.fuyu.save_pretrained(save_directory)
-        else:
-            logger.info("Not saving the frozen Fuyu model.")
-
-        # save all other params except "fuyu"
-        state_dict = self.state_dict()
-        all_other_params = {k: v for k, v in state_dict.items() if "fuyu" not in k}
-        logger.info(f"Saving all other params: {all_other_params.keys()}")
-        torch.save(all_other_params, os.path.join(save_directory, "other_params.pth"))
-
-    def load_pretrained(self, save_directory):
-        logger.info(f"Loading non-LLM checkpoint from {save_directory}")
-        all_other_params = torch.load(os.path.join(save_directory, "other_params.pth"))
-        # load all other params except "fuyu"
-        message = self.load_state_dict(all_other_params, strict=False)
-        logger.info(message)
-        del all_other_params
-
 

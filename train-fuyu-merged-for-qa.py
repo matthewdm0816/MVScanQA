@@ -16,15 +16,13 @@ import random
 from tqdm.auto import tqdm
 from torch.utils.data import DataLoader, Dataset
 from accelerate import Accelerator, DistributedType, DistributedDataParallelKwargs
-from accelerate import FullyShardedDataParallelPlugin
-from torch.distributed.fsdp.fully_sharded_data_parallel import FullOptimStateDictConfig, FullStateDictConfig
 from transformers.integrations.deepspeed import is_deepspeed_zero3_enabled
-# import deepspeed
-
+from accelerate.state import AcceleratorState
+from accelerate.utils import gather_object
+from typing import List, Set, Tuple, Dict, Union, Any, Optional
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from copy import deepcopy
-# from omegaconf import OmegaConf
 from utils.pc_utils import random_sampling, rotx, roty, rotz
 import pickle
 try:
@@ -33,13 +31,13 @@ except ImportError:
     print("MinkowskiEngine is not installed.")
     ME = None
 from icecream import ic
-from models.fuyu_3d import Fuyu3DCausalLMv2, LLM3DCausalLM, LLM3DProcessorWrapper, MyObjectDict, average_meter
+from models.fuyu_3d import Fuyu3DCausalLMv2, MyObjectDict, average_meter
 from collections import OrderedDict
 import pretty_errors
 import uuid
+
 from fuyu_utils import (
     get_optimizer_param_groups_by_names_dict, 
-    ScanQASQA3DDataset, 
     random_sampling, 
     rotx, 
     roty, 
@@ -71,17 +69,15 @@ from fuyu_utils import (
     clean_answer,
     print_once,
     gather_scalar,
-    # birdview_image_getter,
+    SVC_PATH,
 )
-from tokenizer_changer import TokenizerChanger
-from accelerate.state import AcceleratorState
-from accelerate.utils import gather_object
-from typing import List, Set, Tuple, Dict, Union, Any, Optional
+
 
 MEAN_COLOR_RGB = np.array([109.8, 97.2, 83.8])
 LABEL_START_TOKEN = ""
-LABEL_SHIFT = None
 
+
+# --- setup wandb ---
 wandb_project = "Kuri3D-merged-qa"
 if len(wandb_project) > 0:
     os.environ["WANDB_PROJECT"] = wandb_project
@@ -92,7 +88,6 @@ datetime_str = datetime.now().strftime("%Y-%m-%d-%H-%M")
 run_name = base_model_name + "-" + project + "-" + datetime_str
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 output_name = f"{run_name}-{datetime_str}"
-# output_dir = "/scratch/generalvision/mowentao/kuri3d-output/" + output_name
 output_dir = os.path.join(CURRENT_DIR, "..", "kuri3d-output", output_name)
 if not os.path.exists(output_dir):
     os.makedirs(output_dir, exist_ok=True)
@@ -106,23 +101,15 @@ log_format = (
     "%(message)s"
 )
 
-SVC_PATH = "/hostdir/mwt/SVC"
-
-
 GLOBAL_CONF = None
-# logging.basicConfig(format=log_format, level=logging.INFO, datefmt="%I:%M:%S")
 
 def parse_args():
     parser = ArgumentParser()
     # Data
-    # parser.add_argument("--prompt", default="Answer the following VQAv2 question based on the image:{}\x04 {}|ENDOFTEXT||ENDOFTEXT||ENDOFTEXT|")
-    # parser.add_argument("--i2t", type=str, default="/scratch/generalvision/mowentao/ScanQA/data/scene_bbox_view_map_new.json")
     parser.add_argument("--i2t_scanqa", type=str, default=f"{SVC_PATH}/i2t/scene_eval_decl_gpt3.5_aligned_scanqa_qonly_all_video_2.json")
-    # parser.add_argument("--i2t_sqa3d", type=str, default="/scratch/generalvision/ScanQA-feature/scene_view_map_video.json")
     parser.add_argument("--i2t_sqa3d", type=str, default=f"{SVC_PATH}/i2t/scene_eval_sqa_video_qonly.pkl")
     parser.add_argument("--i2t_scan2cap", type=str, default=f"{SVC_PATH}/i2t/scene_bbox_view_map_full.json")
     parser.add_argument("--i2t_scan2cap_val", type=str, default=f"{SVC_PATH}/i2t/scene_bbox_view_map_for_valtest_mask3d.json")
-    # parser.add_argument("--i2t_scanrefer", type=str, default=f"{SVC_PATH}/i2t/scene_bbox_view_map_scanrefer.json")
     parser.add_argument("--i2t_scanrefer", type=str, default=f"{SVC_PATH}/i2t/scene_best_view_for_grounding.pth")
     parser.add_argument("--i2t_scanqa_mv", type=str, default=f"{SVC_PATH}/i2t/scene_eval_scanqa_mv.pth")
     
@@ -177,10 +164,8 @@ def parse_args():
 
     
     # Modality/Prompt
-    parser.add_argument("--use_dummy_image", action="store_true")
     parser.add_argument("--sample_with_sqrt_freq", action="store_true")
     parser.add_argument("--use_no_location_text", action="store_true")
-    parser.add_argument("--use_dummy_image_for_scan2cap", action="store_true")
     parser.add_argument("--label_start_token", type=str, default="\x04")
     parser.add_argument("--prompt_end_token", type=str, default="")
     parser.add_argument("--use_no_dataset_name", action="store_true")
@@ -283,7 +268,6 @@ def parse_args():
     parser.add_argument("--lora_rank_finetune", type=int, default=32)
     parser.add_argument("--lora_alpha_finetune", type=float, default=64)
     parser.add_argument("--lora_dropout_finetune", type=float, default=0.05)
-    parser.add_argument("--renew_lora_epoch", type=int, default=0)
     parser.add_argument("--use_pissa", action="store_true")
     parser.add_argument("--lora_word_embedding", action="store_true")
 
@@ -298,8 +282,6 @@ def parse_args():
     parser.add_argument("--top_k", type=int, default=0)
     parser.add_argument("--top_p", type=float, default=0.9)
     parser.add_argument("--no_repeat_ngram_size", type=int, default=0)
-    # limit answer vocab
-    parser.add_argument("--restrict_vocab", action="store_true")
 
     # Finetune
     parser.add_argument("--checkpoint_path", type=str, default="")
@@ -323,174 +305,8 @@ def get_model(args):
 
     logger.info(f"Using {in_channels} channels for 3D data.")
 
-    # if args.use_3d:
-    if args.use_llm:
-        # modify lora target modules
-        args.lora_target_modules = "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj"
-
-        tokenizer = AutoTokenizer.from_pretrained(args.llm_model_id)
-        tokenizer.pad_token = tokenizer.eos_token
-        processor = LLM3DProcessorWrapper(tokenizer)
-        model = LLM3DCausalLM(
-            llm_type="mistral",
-            model_id=args.llm_model_id,
-            mnet_path="/scratch/generalvision/mowentao/ScanQA/weights.pth",
-            pnpp_path="/scratch/generalvision/mowentao/SQA3D/ScanQA/outputs/2023-06-10_00-11-47_AUXI/model_last.pth",
-            vote2cap_detr_path="/scratch/generalvision/mowentao/ScanQA/LL3DA-main/pretrained/vote2cap-detr/scannet_vote2cap_detr_XYZ_COLOR_NORMAL.pth",
-            freeze_mnet=args.lr_3d <= 1e-8,
-            freeze_pnpp=args.lr_3d <= 1e-8,
-            freeze_vote2cap_detr=args.lr_3d <= 1e-8,
-            spatial_patch_size=args.spatial_patch_size,
-            pooling_method=args.pooling_method,
-            in_channels=in_channels,
-            use_focus_bbox=args.use_focus_bbox,
-            adapter_type=args.adapter_type,
-            pc_tokenizer_type=args.pc_tokenizer_type,
-            num_query_tokens=args.num_query_tokens,
-            qformer_num_hidden_layers=args.qformer_num_hidden_layers,
-            pretrained_qformer=args.pretrained_qformer if args.use_pretrained_qformer else None,
-            vote2cap_return_type=args.vote2cap_return_type,
-            frozen_in_channels=args.frozen_in_channels,
-            merged_frozen_in_channels=args.merged_frozen_in_channels,
-        )
-
-        
-
-    elif args.use_phi3v:
-        # modify lora target modules
-        # args.lora_target_modules = "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj"
-        from models.phi3v_3d import Phi3V3DCausalLM
-        from models.processing_phi3_v import Phi3VProcessor
-        model_id = "../Phi-3.5-vision-instruct"
-        args.lora_target_modules = "gate_up_proj,down_proj,o_proj,qkv_proj"
-
-        # tokenizer = Phi3V3DCausalLM.from_pretrained(model_id
-        # tokenizer.pad_token = tokenizer.eos_token
-        processor = Phi3VProcessor.from_pretrained(model_id, num_crops=16)
-        processor.tokenizer.pad_token = processor.tokenizer.unk_token
-        processor.tokenizer.pad_token_id = processor.tokenizer.convert_tokens_to_ids(processor.tokenizer.pad_token)
-        processor.tokenizer.padding_side = 'right'
-
-        tokenizer = processor.tokenizer
-        logger.info(f"eos_token: {tokenizer.eos_token}")
-
-        # if args.use_object_textual_index:
-        if args.added_object_tokens > 0:
-            logger.info(f"Adding new tokens to tokenizer for object textual index")
-            object_tokens = [f"<OBJ{i}>" for i in range(args.added_object_tokens)]
-            processor.tokenizer.add_tokens(object_tokens)
-
-        model = Phi3V3DCausalLM(
-            model_id=model_id,
-            mnet_path="/scratch/generalvision/mowentao/ScanQA/weights.pth",
-            pnpp_path="/scratch/generalvision/mowentao/SQA3D/ScanQA/outputs/2023-06-10_00-11-47_AUXI/model_last.pth",
-            vote2cap_detr_path="/scratch/generalvision/mowentao/ScanQA/LL3DA-main/pretrained/vote2cap-detr/scannet_vote2cap_detr_XYZ_COLOR_NORMAL.pth",
-            freeze_mnet=args.lr_3d <= 1e-8,
-            freeze_pnpp=args.lr_3d <= 1e-8,
-            freeze_vote2cap_detr=args.lr_3d <= 1e-8,
-            spatial_patch_size=args.spatial_patch_size,
-            pooling_method=args.pooling_method,
-            in_channels=in_channels,
-            use_focus_bbox=args.use_focus_bbox,
-            adapter_type=args.adapter_type,
-            pc_tokenizer_type=args.pc_tokenizer_type,
-            num_query_tokens=args.num_query_tokens,
-            qformer_num_hidden_layers=args.qformer_num_hidden_layers,
-            pretrained_qformer=args.pretrained_qformer if args.use_pretrained_qformer else None,
-            vote2cap_return_type=args.vote2cap_return_type,
-            frozen_in_channels=args.frozen_in_channels,
-            merged_frozen_in_channels=args.merged_frozen_in_channels,
-            object_index_embedding=args.use_object_index_embedding,
-            object_textual_index=args.use_object_textual_index,
-            text_tokenizer=tokenizer,
-            trim_objects=not args.not_trim_objects,
-            added_object_tokens=args.added_object_tokens
-        )
-    else:
-        # model_id = "adept/fuyu-8b"
-        model_id = f"{SVC_PATH}/fuyu-8b"
-        processor = FuyuProcessor.from_pretrained(model_id)
-        tokenizer: LlamaTokenizerFast = processor.tokenizer
-        to_remove_token_ids = set()
-        if args.remove_token_range != "":
-            changer = TokenizerChanger(tokenizer)
-
-            # it should be a list of ranges, e.g., "0-10,20-30", inclusive
-            ranges = args.remove_token_range.split(",")
-            for r in ranges:
-                start, end = r.split("-")
-                to_remove_token_ids.update(range(int(start), int(end)+1))
-
-            logger.warning(f"To remove {len(to_remove_token_ids)} tokens")
-            old_vocab = tokenizer.get_vocab() # {token: id}
-            old_id_to_token = {v: k for k, v in old_vocab.items()} # {id: token}
-            logger.info(f"Old vocab size: {len(old_vocab)}")
-
-            changer.delete_tokens([old_id_to_token[i] for i in to_remove_token_ids], include_substrings=False, delete_merges=False)
-            tokenizer = changer.updated_tokenizer()
-            processor.tokenizer = tokenizer
-            
-            logger.info(f"New vocab size: {len(tokenizer.get_vocab())}")
-            
-
-        tokenizer.pad_token = tokenizer.eos_token # |ENDOFTEXT|
-        # if args.use_object_textual_index:
-        if args.added_object_tokens > 0:
-            logger.info(f"Adding new tokens to tokenizer for object textual index")
-            object_tokens = [f"<OBJ{i}>" for i in range(args.added_object_tokens)]
-            processor.tokenizer.add_tokens(object_tokens)
-
-        model = Fuyu3DCausalLMv2(
-            pretrained_args={
-                "pretrained_model_name_or_path": model_id,
-                "torch_dtype": torch.bfloat16,
-            },
-            mnet_path="/scratch/generalvision/mowentao/ScanQA/weights.pth",
-            pnpp_path="/scratch/generalvision/mowentao/SQA3D/ScanQA/outputs/2023-06-10_00-11-47_AUXI/model_last.pth",
-            vote2cap_detr_path="/scratch/generalvision/mowentao/ScanQA/LL3DA-main/pretrained/vote2cap-detr/scannet_vote2cap_detr_XYZ_COLOR_NORMAL.pth",
-            freeze_mnet=args.lr_3d <= 1e-8,
-            freeze_pnpp=args.lr_3d <= 1e-8,
-            freeze_vote2cap_detr=args.lr_3d <= 1e-8,
-            spatial_patch_size=args.spatial_patch_size,
-            pooling_method=args.pooling_method,
-            in_channels=in_channels,
-            num_think_tokens=args.num_think_tokens,
-            use_focus_bbox=args.use_focus_bbox,
-            adapter_type=args.adapter_type,
-            pc_tokenizer_type=args.pc_tokenizer_type,
-            num_query_tokens=args.num_query_tokens,
-            qformer_num_hidden_layers=args.qformer_num_hidden_layers,
-            pretrained_qformer=args.pretrained_qformer if args.use_pretrained_qformer else None,
-            vote2cap_return_type=args.vote2cap_return_type,
-            use_2d=not args.not_use_2d,
-            use_3d=not args.not_use_3d,
-            predict_frame_params=args.predict_frame_params,
-            coeff_frame_params=args.coeff_frame_params,
-            frozen_in_channels=args.frozen_in_channels,
-            merged_frozen_in_channels=args.merged_frozen_in_channels,
-            p_drop_2d=args.p_drop_2d,
-            p_drop_3d=args.p_drop_3d,
-            do_drop_2d_partial=args.do_drop_2d_partial,
-            p_drop_2d_partial_alpha=args.p_drop_2d_partial_alpha,
-            p_drop_2d_partial_beta=args.p_drop_2d_partial_beta,
-            keep_all_objects=args.keep_all_objects,
-            choose_related_objects=args.choose_related_objects,
-            trim_objects=not args.not_trim_objects,
-            iosa_threshold=args.iosa_threshold,
-            use_object_index_embedding=args.use_object_index_embedding,
-            use_object_textual_index=args.use_object_textual_index,
-            text_tokenizer=tokenizer,
-            added_object_tokens=args.added_object_tokens,
-            to_remove_token_ids=to_remove_token_ids,
-            use_grounding_classifier=args.use_grounding_classifier,
-            coeff_grounding_classifier=args.coeff_grounding_classifier,
-        )
-    # model.to_bfloat16()
-
-    # show all param precision
-    # if args.accelerator.is_local_main_process:
-    #     for name, param in model.named_parameters():
-    #         print(name, param.dtype)
+    model_id = f"{SVC_PATH}/fuyu-8b"
+    processor = FuyuProcessor.from_pretrained(model_id)
 
     if not args.detector_from_scratch:
         model.load_detector()
@@ -498,7 +314,6 @@ def get_model(args):
     if args.checkpoint_path != "":
         logger.info(f"Loading checkpoint from {args.checkpoint_path}...")
         model.load_pretrained(args.checkpoint_path)
-
 
     print(model)
     return model, processor 
@@ -541,9 +356,6 @@ def get_peft_fuyu(model, args):
         inference_mode=False, 
         bias="none",
         task_type="CAUSAL_LM",
-        # target_modules=["q_proj", "k_proj", "v_proj", "o_proj","gate_proj", "up_proj", "down_proj"]
-        # for persimmon
-        # target_modules=["query_key_value", "dense", "dense_h_to_4h", "dense_4h_to_h"] # "dense", "dense_h_to_4h", "dense_4h_to_h"
         target_modules=args.lora_target_modules.split(","),
         modules_to_save=modules_to_save,
         init_lora_weights="pissa_niter_48" if args.use_pissa else True,
@@ -551,9 +363,6 @@ def get_peft_fuyu(model, args):
 
     # apply LORA to the LLM
     if getattr(model, "fuyu", None) is not None:
-        
-        
-        # else:
         logger.info(f"Applying LoRA in {type(model)} submodel Fuyu...")
         model.fuyu: PeftModel = get_peft_model(model.fuyu, peft_config)
 
@@ -615,15 +424,9 @@ def get_answer_vocab(qa_datasets):
     return sorted(list(answer_vocab))
 
 def batch_generate_v2(model: Fuyu3DCausalLMv2, model_inputs, max_new_tokens=80, return_text=True, skip_special_tokens=False, generation_config={}):
-    # model_inputs = model_inputs.to('cuda')
-
-    # generated = model.generate( **model_inputs, **generation_config, max_new_tokens=max_new_tokens, pad_token_id=processor.tokenizer.eos_token_id, synced_gpus=True)[:, -max_new_tokens:]
     generated = model.generate( **model_inputs, **generation_config, max_new_tokens=max_new_tokens, synced_gpus=False)[:, -max_new_tokens:]
 
-    # print(processor.batch_decode(generated, skip_special_tokens=False))
     model_outputs: List[str] = processor.tokenizer.batch_decode(generated, skip_special_tokens=skip_special_tokens)
-    # print(model_outputs)
-    # prediction = [m.split('\x04', 1)[1].strip() if '\x04' in m else m for m in model_outputs]
     if any(['\x04' in m for m in model_outputs]):
         prediction = [m.split('\x04', 1)[1].strip() if '\x04' in m else m for m in model_outputs]
     elif any(['[/INST]' in m for m in model_outputs]):
@@ -682,9 +485,6 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
 
     # make merged dataset: ScanQA + SQA3D + Scan2Cap (on ScanRefer)
     datasets = []
-    datasets_annealing_schedule = []
-    downstream_ratio = (0.2, 1.0)
-    pretrain_ratio = (1.0, 0.2)
 
     if args.add_scanqa:
         scanqa_train = ScanQADatasetUnified(
@@ -697,7 +497,6 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
             **shared_config,
         )
         datasets.append(scanqa_train)
-        datasets_annealing_schedule.append(downstream_ratio)
 
     if args.add_scanqa_mv:
         scanqa_mv_train = ScanQADatasetUnified(
@@ -710,7 +509,6 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
             **shared_config,
         )
         datasets.append(scanqa_mv_train)
-        datasets_annealing_schedule.append(downstream_ratio)
 
     if args.add_sqa3d:
         sqa3d_train = ScanQADatasetUnified(
@@ -722,7 +520,6 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
             **shared_config,
         )
         datasets.append(sqa3d_train)
-        datasets_annealing_schedule.append(downstream_ratio)
 
     if args.add_lamm3d:
         lamm3d = OpenEndedQADataset(
@@ -734,7 +531,6 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
             **shared_config,
         )
         datasets.append(lamm3d)
-        datasets_annealing_schedule.append(pretrain_ratio)
     
     if args.add_scan2cap:
         scan2cap_dataset = Scan2CapSimpleDataset(
@@ -749,7 +545,6 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
         if args.deduplicate_captions:
             scan2cap_dataset.deduplicate_captions()
         datasets.append(scan2cap_dataset)
-        datasets_annealing_schedule.append(downstream_ratio)
 
 
     if args.add_scan2obj:
@@ -763,10 +558,8 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
             **shared_config,
             **shared_densecap_config
         )
-        # if args.deduplicate_captions:
         scan2obj_dataset.deduplicate_captions() # object name is a must to deduplicate
         datasets.append(scan2obj_dataset)
-        datasets_annealing_schedule.append(pretrain_ratio)
 
     if args.add_nr3d:
         scan2cap_nr3d_dataset = Scan2CapSimpleDataset(
@@ -782,7 +575,6 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
         if args.deduplicate_captions:
             scan2cap_nr3d_dataset.deduplicate_captions()
         datasets.append(scan2cap_nr3d_dataset)
-        datasets_annealing_schedule.append(downstream_ratio)
 
     if args.add_nr3d_val_for_training:
         scan2cap_nr3d_val_dataset = Scan2CapSimpleDataset(
@@ -797,7 +589,6 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
         if args.deduplicate_captions:
             scan2cap_nr3d_val_dataset.deduplicate_captions()
         datasets.append(scan2cap_nr3d_val_dataset)
-        datasets_annealing_schedule.append(downstream_ratio)
 
     if args.add_sr3d:
         scan2cap_sr3d_dataset = Scan2CapSimpleDataset(
@@ -813,7 +604,6 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
         if args.deduplicate_captions:
             scan2cap_sr3d_dataset.deduplicate_captions()
         datasets.append(scan2cap_sr3d_dataset)
-        datasets_annealing_schedule.append(pretrain_ratio)
 
 
     if args.add_sr3d_val_for_training:
@@ -830,7 +620,6 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
         if args.deduplicate_captions:
             scan2cap_sr3d_val_dataset.deduplicate_captions()
         datasets.append(scan2cap_sr3d_val_dataset)
-        datasets_annealing_schedule.append(pretrain_ratio)
 
     if args.add_scenecap:
         scenecap_dataset = SceneCaptionDataset(
@@ -842,7 +631,6 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
             **shared_config,
         )
         datasets.append(scenecap_dataset)
-        datasets_annealing_schedule.append(pretrain_ratio)
 
     if args.add_framecap:
         framecap_dataset = ScanNetFrameCaptionDataset(
@@ -856,7 +644,6 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
             **shared_config,
         )
         datasets.append(framecap_dataset)
-        datasets_annealing_schedule.append(pretrain_ratio)
 
         if args.framecap_as_input:
             val_framecap_dataset = ScanNetFrameCaptionDataset(
@@ -897,7 +684,6 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
             **shared_config,
         )
         datasets.append(frameqa_dataset)
-        datasets_annealing_schedule.append(pretrain_ratio)
 
     if args.add_framecap_val_for_training:
         val_framecap_dataset = ScanNetFrameCaptionDataset(
@@ -911,7 +697,6 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
             **shared_config,
         )
         datasets.append(val_framecap_dataset)
-        datasets_annealing_schedule.append(pretrain_ratio)
 
     if args.add_scanrefer:
         scanrefer_dataset = ScanReferDataset(
@@ -925,7 +710,6 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
             **shared_config,
         )
         datasets.append(scanrefer_dataset)
-        datasets_annealing_schedule.append(downstream_ratio)
 
     if args.add_scanrefer_nr3d:
         scanrefer_nr3d_dataset = ScanReferDataset(
@@ -937,7 +721,6 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
             **shared_config,
         )
         datasets.append(scanrefer_nr3d_dataset)
-        datasets_annealing_schedule.append(downstream_ratio)
 
     if args.add_scanrefer_sr3d:
         scanrefer_sr3d_dataset = ScanReferDataset(
@@ -949,17 +732,10 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
             **shared_config,
         )
         datasets.append(scanrefer_sr3d_dataset)
-        datasets_annealing_schedule.append(downstream_ratio)
-
-    
     
     if args.use_dummy_image:
         for dataset in datasets:
             dataset.image_getter = dummy_image_getter
-
-    # if args.use_birdview:
-    #     for dataset in datasets:
-    #         dataset.use_birdview = True
 
     if args.use_dummy_image_for_scan2cap:
         if scan2cap_dataset is not None:
@@ -976,7 +752,6 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
     train_dataset = MergedDataset(
         datasets=datasets,
         sample_with_sqrt_freq=args.sample_with_sqrt_freq,
-        annealing_schedule=datasets_annealing_schedule if args.use_annealing_data_schedule else None,
     )
 
     # for dataset in datasets:
@@ -1062,16 +837,6 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
             **shared_densecap_config,
             **shared_config,
         )
-        # val_dataset_scan2cap_gt = Scan2CapSimpleDataset(
-        #     name="scan2cap",
-        #     split="val",
-        #     use_augment=False,
-        #     # i2t=args.i2t_scan2cap,
-        #     i2t=args.i2t_scan2cap,
-        #     views_path=args.frame_path_scan2cap,
-        #     use_no_location_text=args.use_no_location_text,
-        #     **shared_config,
-        # )
         val_dataset_scan2cap_gt = None
 
     else:
@@ -1104,16 +869,6 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
 
     if args.add_scan2obj_val:
         logger.warning("Scan2Obj validation dataset is not implemented yet.")
-    #     val_dataset_scan2obj = Scan2ObjectNameDataset(
-    #         name="scan2obj",
-    #         split="val",
-    #         use_augment=False,
-    #         i2t=args.i2t_scan2cap,
-    #         views_path=args.frame_path_scan2cap,
-    #         use_no_location_text=args.use_no_location_text,
-    #         **shared_config,
-    #     )
-    #     val_dataset_scan2obj.deduplicate_captions()
 
     if args.add_scanrefer_train_for_val:
         # NOTE: DEBUG
@@ -1180,9 +935,6 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
         val_dataset_scan2cap_gt.image_getter = dummy_image_getter
         val_dataset_nr3d.image_getter = dummy_image_getter
 
-    # for dataset in [val_dataset, val_dataset_sqa3d, val_dataset_scan2cap, test_dataset_sqa3d, val_dataset_scan2cap_gt, val_dataset_nr3d]:
-    #     if dataset is not None:
-    #         dataset.set_pc_tokenizer_type(args.pc_tokenizer_type)
 
     # answer vocab
     if args.add_scanqa:
@@ -1208,15 +960,6 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
         "val-scanrefer-train": val_dataset_scanrefer_train,
     }
 
-    if args.use_dummy_image:
-        for dataset_kind, dataset in dataset_dict.items():
-            if dataset is not None and ("val" in dataset_kind or "test" in dataset_kind):
-                dataset.image_getter = dummy_image_getter
-
-    # if args.use_birdview:
-    #     for dataset_kind, dataset in dataset_dict.items():
-    #         if dataset is not None and ("val" in dataset_kind or "test" in dataset_kind):
-    #             dataset.use_birdview = True
 
     def recursive_set_tokenizer_type(dataset_or_list, pc_tokenizer_type):
         if isinstance(dataset_or_list, list):
@@ -1310,39 +1053,6 @@ def collate_3d(examples):
     
     raise NotImplementedError("Unknown 3D data format with keys: " + str(examples[0].keys()))
 
-def reformat_to_phi3v(text: str, tokenizer=None):
-    if tokenizer is None:
-        tokenizer = GLOBAL_CONF.processor.tokenizer
-
-    splitted = text.split("\x04")
-    if len(splitted) or splitted[1].strip() == "":
-        instruction = splitted[0]
-        response = ""
-    else:
-        instruction, response = text.split("\x04")
-
-    instruction = instruction.strip()
-    response = response.strip()
-
-    # add <|image_{i}|> placeholder
-    instruction = f"<|image_1|>\n {instruction}"
-    messages = [
-        {"role": "user", "content": instruction},
-        # {"role": "assistant", "content": response},
-    ]
-    if response != "":
-        messages.append({"role": "assistant", "content": response})
-
-    
-    phi3v_formatted_text = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=response == "", # if response is None, it need to generate response
-    ) 
-    # <|user|>\n<|image_1|>\nSummarize the deck of slides.<|end|>\n<|assistant|>\n [response goes here...]
-
-    return phi3v_formatted_text
-
 def pad_sequence(sequences, padding_side='right', padding_value=0):
     """
     Pad a list of sequences to the same length.
@@ -1368,41 +1078,15 @@ def collate_vl(examples, is_eval=False) -> dict:
     # print(texts)
     images = [e["image"] for e in examples]
 
-    if GLOBAL_CONF.use_phi3v:
-        texts = [reformat_to_phi3v(t) for t in texts]
-        output = [
-            processor(
-                text=t,
-                images=i,
-                padding="max_length",
-                truncation=True,
-                return_tensors="pt",
-            )
-            for t, i in zip(texts, images)
-        ]
-        pixel_values = torch.cat([o["pixel_values"] for o in output], dim=0)
-        image_sizes = torch.cat([o["image_sizes"] for o in output], dim=0)
-        input_ids = pad_sequence(
-            [o["input_ids"] for o in output],
-            padding_side='right', 
-            padding_value=processor.tokenizer.pad_token_id
-        )
-        output = dict(
-            pixel_values=pixel_values,
-            image_sizes=image_sizes,
-            input_ids=input_ids,
-        )
+    output = processor(
+        text=texts,
+        images=images,
+        padding="max_length",
+        truncation=True,
+        return_tensors="pt",
+    )
 
-    else:
-        output = processor(
-            text=texts,
-            images=images,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt",
-        )
-
-        output = {k: v for k, v in output.items()}
+    output = {k: v for k, v in output.items()}
 
     texts_instructions = [e['target_instruction'] for e in examples] # without \x04 and later tokens (gt annotations)
     qformer_inputs = qtokenizer(texts_instructions, padding="longest", return_tensors="pt")
@@ -1566,8 +1250,6 @@ def get_optimizer_scheduler(args, model):
         scheduler = transformers.get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_steps, num_training_steps=args.total_steps)
     else:
         raise NotImplementedError(f"Scheduler {args.scheduler} not implemented.")
-    # sqrt scheduler with warmup
-    # scheduler = transformers.get_inverse_sqrt_schedule(optimizer, num_warmup_steps=args.warmup_steps, num_training_steps=args.total_steps)
     return optimizer, scheduler
     
 
@@ -1648,13 +1330,6 @@ def train(args, epoch):
         if step % args.print_log_step == 0:
             if accelerator.is_local_main_process:
                 print(f"[{epoch}/{len(args.history_losses)}-{args.total_steps}]loss: {args.history_losses[-1]}, lr: {args.scheduler.get_last_lr()[0]}, loss_frame: {loss_frame}, loss_grounding: {loss_grounding}, acc: {grounding_acc:.6f}, acc_pos: {grounding_acc_positive:.6f}, acc_neg: {grounding_acc_negative:.6f}, acc_softmax: {grounding_acc_softmax:.6f}")
-                # wandb.log({
-                #     # "train/loss": args.history_losses[-1], 
-                #     "train/loss": np.mean(args.history_losses[-args.print_log_step:]),
-                #     "train/global_step": len(args.history_losses),
-                #     "train/seen_samples": len(args.history_losses) * args.batch_size * args.accelerator.num_processes,
-                #     "train/lr": args.scheduler.get_last_lr()[0],
-                # })
 
         if len(args.history_losses) % args.checkpointing_steps == 0: # validate at the first step
             # validate
@@ -1683,17 +1358,8 @@ def validate(args, epoch):
     average_meter.reset()
     accelerator: Accelerator = args.accelerator
 
-    if is_deepspeed_zero3_enabled():
-        import deepspeed
-        logger.info("DeepSpeed ZeRO-3 detected. try to save model once, to make all processes have the full model.")
-        # save model once, to make all processes have the full model
-        unwrapped_model: Fuyu3DCausalLMv2 = accelerator.unwrap_model(args.model)
-        unwrapped_model.save_pretrained("./tmp/kuri-model")
-
-        # unwrapped_model.load_pretrained("./tmp/kuri-model")
     
     all_metrics = {}
-    # correct_em, correct_refined_em, total = 0, 0, 0
     for kind, dataloader in {
         "scanqa-test-w-obj": args.dataloaders["test-scanqa-w-obj"],
         "scanqa-test-wo-obj": args.dataloaders["test-scanqa-wo-obj"],
@@ -1732,15 +1398,7 @@ def validate(args, epoch):
                 elif kind in ["scanqa-test-w-obj", "scanqa-test-wo-obj"]:
                     target_text = [["dummy"]] * batch_size # scanqa test set does not have target text
                 elif kind in ["scanrefer", "scanrefer-nr3d", "scanrefer-test", "scanrefer-train"]:
-                    # target_text = copied_dict["target_id"]
                     target_text = (copied_dict["target_id"], copied_dict["object_index"])
-                    # ic(batch["target_object_indices"])
-                    # the latter is the closest predicted object index for GT target
-                    # for logging purposes
-
-                    # target_text = [
-                    #     (scan2cap_id, target_id) for scan2cap_id, target_id in zip(copied_dict["scan2cap_id"], copied_dict["target_id"])
-                    # ]
                 else:
                     raise NotImplementedError(f"kind {kind} not implemented.")
                 
@@ -1748,10 +1406,8 @@ def validate(args, epoch):
                 unwrapped_model = accelerator.unwrap_model(args.model, keep_fp32_wrapper=True)
                 if accelerator.is_local_main_process:
                     transformers.utils.logging.set_verbosity_error() # disable logging
-                # print(unwrapped_model.forward, getattr(unwrapped_model.forward, "__wrapped__", None))
                 pred_answer = batch_generate_v2(
                     unwrapped_model, 
-                    # prompt=args.prompt.split("\x04")[0], 
                     batch,
                     max_new_tokens=args.max_new_tokens,
                     return_text=True,
@@ -1795,11 +1451,6 @@ def validate(args, epoch):
                         ]
                 elif kind in ["scanrefer", "scanrefer-nr3d", "scanrefer-sr3d", "scanrefer-train"]:
                     for i, (pred, sample_id) in enumerate(zip(pred_answer, copied_dict["scanrefer_id"])):
-                        # if pred.isdigit():
-                        #     pred = int(pred)
-                        # else:
-                        #     logger.warning(f"Non-integer bbox index prediction: {repr(pred)}")
-                        #     pred = 0
                         preds[sample_id] = pred # this shall be a prediction of bbox index (of input boxes)
                         target_texts[sample_id] = target_text[0][i]
                 else:
@@ -1825,6 +1476,7 @@ def validate(args, epoch):
 
             if kind in ["scanqa"] and args.clean_qa_answer:
                 # clean both gt and pred, this is done in LEO and ChatScene when evaluation on validation set
+                # -- no big difference though
                 print_once("Cleaning QA answers...")
                 target_texts = {k: [clean_answer(vv) for vv in v] for k, v in target_texts.items()}
                 preds = {k: [clean_answer(vv) for vv in v] for k, v in preds.items()}
@@ -1887,9 +1539,6 @@ def validate(args, epoch):
 
             target_texts = gather_object([(k, v) for k, v in target_texts.items()])
             target_texts = {k: v for k, v in target_texts} # target ids, of bbox array (not real object id)
-
-            # metrics_epoch = {}
-            # metric_message = ""
 
             for iou in [0.25, 0.5]:
                 # preds are bbox indices of input bbox
@@ -1965,18 +1614,12 @@ if __name__ == "__main__":
     args.slurm_job_id = os.environ.get("SLURM_JOB_ID", None)
     args.slurm_gpus = os.environ.get("SLURM_GPUS", None)
         
-
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
-
-    # accelerator = Accelerator(fsdp_plugin=fsdp_plugin)
     accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps, kwargs_handlers=[ddp_kwargs])
     args.accelerator = accelerator
     average_meter.accelerator = accelerator
     
     state = accelerator.state
-    if state.distributed_type == DistributedType.DEEPSPEED:
-        state.deepspeed_plugin.deepspeed_config['train_micro_batch_size_per_gpu'] = args.batch_size
-
     if accelerator.is_local_main_process:
         print(args)
 
@@ -2032,23 +1675,14 @@ if __name__ == "__main__":
     if args.prompt_end_token != processor.tokenizer.eos_token:
         logger.warning(f"Prompt end token: {args.prompt_end_token} instead of {processor.tokenizer.eos_token}")
 
-   
-
     if args.use_llm:
         LABEL_START_TOKEN = "[/INST]"
-        LABEL_SHIFT = 0
     elif args.use_phi3v:
         LABEL_START_TOKEN = "<|assistant|>\n"
-        LABEL_SHIFT = 0
     else:
         LABEL_START_TOKEN = "\x04"
-        LABEL_SHIFT = -1
 
-    logger.info(f"LLM/LVLM LABEL_START_TOKEN: {LABEL_START_TOKEN}, LABEL_SHIFT: {LABEL_SHIFT}")
-
-    if is_deepspeed_zero3_enabled():
-        # deepspeed.utils.set_z3_leaf_modules(model, [LinearEncoders])
-        pass
+    logger.info(f"LLM/LVLM LABEL_START_TOKEN: {LABEL_START_TOKEN}")
 
 
     args.model = model
@@ -2064,23 +1698,9 @@ if __name__ == "__main__":
 
     logger.info(f"Total {len(args.datasets['train'])} training samples.")
     logger.info(f"Total {len(args.datasets['finetune'])} finetune samples.")
-    # logger.info(f"Total {len(args.datasets['val'])} validation samples.")
-    # total_val_size = (
-    #     len(args.datasets['val']) if args.datasets['val'] is not None else 0
-    #     + len(args.datasets['val-sqa3d']) if args.datasets['val-sqa3d'] is not None else 0
-    #     + len(args.datasets['val-scan2cap']) if args.datasets['val-scan2cap'] is not None else 0
-    #     + len(args.datasets['test-sqa3d']) if args.datasets['test-sqa3d'] is not None else 0
-    #     + len(args.datasets['test-scanqa-w-obj']) if args.datasets['test-scanqa-w-obj'] is not None else 0
-    #     + len(args.datasets['test-scanqa-wo-obj']) if args.datasets['test-scanqa-wo-obj'] is not None else 0
-    #     + len(args.datasets['val-scanrefer']) if args.datasets['val-scanrefer'] is not None else 0
-    #     + len(args.datasets['val-scanrefer-nr3d']) if args.datasets['val-scanrefer-nr3d'] is not None else 0
-    #     + len(args.datasets['val-scanrefer-sr3d']) if args.datasets['val-scanrefer-sr3d'] is not None else 0
-    #     + len(args.datasets['val-scanrefer-train']) if args.datasets['val-scanrefer-train'] is not None else 0
-    # )
     total_val_size = sum([len(v) for k, v in args.datasets.items() if (k.startswith("val") or k.startswith("test")) and v is not None])
     logger.info(f"Total {total_val_size} validation samples.")
     # calc total steps
-    # args.total_steps = args.epochs * len(args.datasets["train"]) // args.batch_size // accelerator.num_processes
     total_pretrain_steps = (args.epochs - args.finetune_epochs) * len(args.datasets["train"]) // args.batch_size // accelerator.num_processes
     total_finetune_steps = args.finetune_epochs * len(args.datasets["finetune"]) // args.batch_size // accelerator.num_processes
     args.total_steps = total_pretrain_steps + total_finetune_steps
@@ -2097,13 +1717,6 @@ if __name__ == "__main__":
     args.optimizer = optimizer
     args.scheduler = scheduler
 
-    # args.model, args.optimizer, args.dataloaders["train"], args.dataloaders["val"], args.scheduler = accelerator.prepare(
-    #     args.model, args.optimizer, args.dataloaders["train"], args.dataloaders["val"], args.scheduler
-    # )
-    # NOTE: prepare scheduler will make it step for N_GPU times, which is not what we want
-    # args.model, args.optimizer, args.dataloaders["train"], args.dataloaders["val"], args.dataloaders["val-sqa3d"], args.dataloaders["val-scan2cap"], args.dataloaders["finetune"] = accelerator.prepare(
-    #     args.model, args.optimizer, args.dataloaders["train"], args.dataloaders["val"], args.dataloaders["val-sqa3d"], args.dataloaders["val-scan2cap"], args.dataloaders["finetune"]
-    # )
     args.model, args.optimizer = accelerator.prepare(args.model, args.optimizer)
     for k, v in args.dataloaders.items():
         if v is not None:
@@ -2149,13 +1762,6 @@ if __name__ == "__main__":
             # "constraint",
             ])
 
-    # avoid record to wandb
-    if args.restrict_vocab:
-        tokenizer: transformers.LlamaTokenizerFast = processor.tokenizer
-        args.generation_config["constraints"] = [transformers.DisjunctiveConstraint([
-            tokenizer.encode(f"{v}|ENDOFTEXT|", add_special_tokens=False) for v in args.answer_vocab
-        ])]
-        # extremely slow.
 
     if args.validate_at_start:
         validate(args, 0)
@@ -2163,7 +1769,6 @@ if __name__ == "__main__":
     for epoch in range(args.epochs):
         args.is_finetuning = epoch >= (args.epochs - args.finetune_epochs)
         train(args, epoch)
-        # validate(args, epoch)
 
         # save
         if not os.path.exists(output_dir):
@@ -2171,14 +1776,6 @@ if __name__ == "__main__":
         if not args.no_save:
             unwrapped_model: Fuyu3DCausalLMv2 = accelerator.unwrap_model(args.model)
             unwrapped_model.save_pretrained(output_dir)
-
-        if args.renew_lora_epoch > 0:
-            # remove the previous lora, and create a new one
-            logger.info(f"Renewing PEFT LORA at epoch {epoch}...")
-            args.model.add_adapter(
-                f"lora_epoch_{epoch}", args.peft_config
-            )
-            args.set_adapter(f"lora_epoch_{epoch}")
 
 
     # validate(args, args.epochs - 1) # validate at the end of training
