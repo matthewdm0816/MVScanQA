@@ -1,1 +1,0 @@
-/scratch/mowentao/BLIP/models/nlvr_encoder.py
