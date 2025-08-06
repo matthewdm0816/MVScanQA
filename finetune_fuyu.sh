@@ -3,47 +3,12 @@ export LANG=en_US.UTF-8
 export OMP_NUM_THREADS=8
 
 # Auto GPU NUMBER
-# export SLURM_GPUS=$(($(echo $SLURM_JOB_GPUS | tr -cd , | wc -c)+1))
-# echo $SLURM_GPUS
-# export SLURM_GPUS=8
 export SLURM_GPUS=$(($(echo $CUDA_VISIBLE_DEVICES | tr -cd , | wc -c)+1))
 
 echo "Number of processes (GPUs): $SLURM_GPUS"
 
 export PORT=$(shuf -i 29000-30000 -n 1)
 
-# python isft_mistral.py
-# accelerate launch --config_file "finetune-fuyu.yaml" --num_processes=$SLURM_GPUS --main_process_port=$PORT \
-#     train-fuyu-3d.py --lr "5e-5" --weight_decay "5e-4" --lora_rank 64 --epochs 10 \
-#     --batch_size 16 --train_ratio 1 --num_workers 8 --verbose \
-#     --prompt "Answer the following ScanQA question based on the image:{}\x04 {}|ENDOFTEXT||ENDOFTEXT||ENDOFTEXT|" \
-#     --prompt_config "config-fuyu.json"
-    # --lora_target_modules "query_key_value"
-
-# train jointly QA
-# accelerate launch --config_file "finetune-fuyu.yaml" --num_processes=$SLURM_GPUS --main_process_port=$PORT \
-#     train-fuyu-3d.py --lr "5e-5" --lr_adapter "5e-5" --lr_3d "1e-5" --weight_decay "0" --lora_rank 256 --epochs 3 --scheduler "cosine" \
-#     --batch_size 1 --gradient_accumulation_steps 2 --train_ratio 1 --num_workers 8 --verbose --gradient_clipping 1.0 \
-#     --prompt "Answer the following ScanQA question based on the image and the 3D indoor scene:{}\x04 {}|ENDOFTEXT||ENDOFTEXT||ENDOFTEXT|" \
-#     --sqa_prompt "My current situation: {} Answer the following SQA3D question based on the situation, image and the 3D indoor scene:{}\x04 {}|ENDOFTEXT||ENDOFTEXT||ENDOFTEXT|" \
-#     --use_3d --spatial_patch_size 24  --pooling_method "max" \
-#     --generation_method "beam_search" --num_beams 5 \
-#     --spatial_patch_size 32 --batch_size 1 --gradient_accumulation_steps 2 --lora_rank 256 \
-#     --dataset "scanqa_sqa" --use_augment \
-
-# train scanrefer
-# accelerate launch --config_file "finetune-fuyu.yaml" --num_processes=$SLURM_GPUS --main_process_port=$PORT \
-#     train-fuyu-gd.py --lr "5e-5" --lr_adapter "5e-5" --lr_3d "1e-5" --weight_decay "0" --lora_rank 256 --epochs 3 --scheduler "cosine" \
-#     --batch_size 1 --gradient_accumulation_steps 2 --train_ratio 1 --num_workers 24 --verbose --gradient_clipping 1.0 \
-#     --use_3d --spatial_patch_size 32  --pooling_method "max" \
-#     --spatial_patch_size 32 --batch_size 1 --gradient_accumulation_steps 2 --lora_rank 256 --lora_rank 512 \
-#     --dataset "scanrefer" \
-#     --shift_bbox_to_positive \
-#     --reinforce --reinforce_sigma 4 \
-#     --generation_method "beam_search" --num_beams 5 \
-    # --epochs 10 \
-
-    # --use_augment \
 
 # <> FINETUNE
 # /scratch/generalvision/mowentao/kuri3d-output/fuyu-8b-scanqa-2024-03-15-12-29-2024-03-15-12-29/ckpt-87822
@@ -67,8 +32,8 @@ export PORT=$(shuf -i 29000-30000 -n 1)
 accelerate launch --config_file "finetune-fuyu.yaml" --num_processes=$SLURM_GPUS --main_process_port=$PORT \
     train-fuyu-merged-for-qa.py --lr "5e-5" --lr_adapter "5e-5" --lr_3d "1e-5" --weight_decay "0" --scheduler "cosine" \
     --train_ratio 1 --num_workers 64 --verbose --gradient_clipping 1.0 \
-    --use_3d --pooling_method "max" \
-    --spatial_patch_size 24 --batch_size 1 --gradient_accumulation_steps 1 --lora_rank 128 --lora_alpha 256 \
+    --use_3d --pooling_method "max" --spatial_patch_size 24\
+    --lora_rank 128 --lora_alpha 256 \
     --generation_method "beam_search" --num_beams 5 --eval_batch_size 2 \
     --adapter_type ffn --num_query_tokens 128 --qformer_num_hidden_layers 6 --vote2cap_return_type "box_features" \
     --finetune_epochs 0 --epochs 2 \
@@ -82,139 +47,7 @@ accelerate launch --config_file "finetune-fuyu.yaml" --num_processes=$SLURM_GPUS
     --add_framecap --framecap_percentile "30.0" --framecap_name "framecap-gpt4o" \
     --add_scanqa --add_sqa3d --add_nr3d --add_scan2cap --add_sr3d --add_nr3d_val \
     --checkpointing_steps 0.5 --best_criteria "scan2cap_CiDEr@0.5" --prompt_end_token "|ENDOFTEXT|" \
-    --batch_size 1 --eval_batch_size 1 --gradient_accumulation_steps 2 --use_birdview \
+    --batch_size 1 --eval_batch_size 1 --gradient_accumulation_steps 2 \
     --only_load_adapter --checkpoint_path "../SVC/pt_adapter_with_nr3d_val" \
     2>&1 | tee ../kuri-logs/log-$(date +'%Y-%m-%d-%H-%M-%S').log
-    # --mv_for_scanqa --i2t_scanqa "../SVC/i2t/scanqa_resampled_i2t/scanqa_scene_view_map_resampled_16_4.json" \
-    # --add_scanqa_mv --i2t_scanqa_mv "../SVC/i2t/resampled/scanqa_mv_scene_view_map_resampled_16_4.json" --multiple_input_images "2x2" \
-    # --frozen_object_type "uni3d-mask3d-box" \
-    # --only_load_adapter --checkpoint_path "../kuri3d-output/fuyu-8b-scanqa-2024-11-11-21-50-2024-11-11-21-50/best-scan2cap_CiDEr@0.5" \
-    # --add_framecap --framecap_percentile "30.0" --framecap_name "framecap-gpt4o" \
-    # --only_load_adapter --checkpoint_path "../SVC/pt_adapter_with_nr3d_val"
-    # --use_pissa
-    # --use_annealing_data_schedule \
-    # --lora_rank 0 --epochs 10 # [FROZEN 1st stage]
-    # --lora_rank 16 --lora_alpha 32
-    # --use_llm --framecap_as_input --prompt_end_token "</s>" 
-    # --choose_related_objects --use_related_object_bbox \
-    # --use_related_object_bbox \
-    # --lora_rank 256 --lora_alpha 256 \
-    # --add_nr3d_val_for_training --add_sr3d_val_for_training --add_framecap_val_for_training \
-    # --only_load_adapter --checkpoint_path "/home/ubuntu/hina/" \
-    # --adapter_type moe-qformer --num_query_tokens 128 --qformer_num_hidden_layers 6 --vote2cap_return_type "box_features" \
-
-
-    # --add_nr3d_val_for_training --add_sr3d_val_for_training --add_framecap_val_for_training \
-    # --add_frameqa \
-    # --add_framecap --framecap_percentile "30.0" --framecap_name "framecap" \
-    
-    # --add_nr3d_val_for_training --add_sr3d_val_for_training --add_framecap_val_for_training \
-    # --add_frameqa \
-    # --p_drop_2d 0.15 --do_drop_2d_partial 
-    
-    # --keep_all_objects
-    # --add_nr3d_val_for_training --add_sr3d_val_for_training \ [ADD REFERIT3D validation text for training]
-    # --add_framecap_val_for_training \ [ADD FRAMECAP validation text for training]
-
-    # --no_bbox_mask_for_framecap \
-    # --not_use_2d --framecap_as_input \
-    # --use_llm --framecap_as_input --prompt_end_token "</s>" \
-    # --use_no_3d \
-    # --predict_frame_params --coeff_frame_params 0.01
-
-    # --pc_tokenizer_type merged-frozen --frozen_object_type "pnpp-vote2cap-box+pnpp" \
-
-    # <> qformer, vote2cap, random cuboid aug
-    # --predict_frame_params \ [PRETRAIN: predict frame parameters]
-    # --use_llm --prompt_end_token "</s>"  \ [use LLM and LLM prompt]
-    # --add_framecap --framecap_percentile "30.0" --framecap_name "framecap" \ [framecaption-300K]
-    # --add_framecap --framecap_percentile "30.0" --framecap_name "framecap-2" \ [framecaption-1M]
-    # --lora_rank 0 --epochs 10 # [FROZEN 1st stage]
-    # --lora_rank "-1" --batch_size 1 \ [FULL size finetune]
-    # --only_load_adapter --checkpoint_path "/scratch/generalvision/mowentao/kuri3d-output/fuyu-8b-scanqa-2024-05-12-10-44-2024-05-12-10-44/best-scan2cap_CiDEr@0.5" \ [1st stage pretrained adapters, add referit3d val]
-    # --only_load_adapter --checkpoint_path "/scratch/generalvision/mowentao/kuri3d-output/fuyu-8b-scanqa-2024-04-06-20-47-2024-04-06-20-47/best-scan2cap_CiDEr@0.5" \ [1st stage pretrained adapters]
-    # --only_load_adapter --checkpoint_path "/scratch/generalvision/mowentao/kuri3d-output/fuyu-8b-scanqa-2024-05-03-20-24-2024-05-03-20-24/ckpt-39054" \ [1st stage pretrained, merged-frozen, pnpp+vote2cap-box]
-    # --adapter_type qformer --num_query_tokens 32 --qformer_num_hidden_layers 6 \
-    # --pc_tokenizer_type vote2cap-detr --use_color --use_normal --use_height --use_augment --use_pretrained_qformer \
-    # --no_bbox_mask_for_framecap
-    # --add_scenecap \
-    # --unfreeze_word_embedding
-    # --use_no_location_text
-    # --use_no_dataset_name
-    # --add_sr3d \
-    # --sample_with_sqrt_freq \
-    # --use_dummy_image_for_scan2cap
-    # --checkpointing_steps 50 --train_ratio 0.01
-    # --checkpointing_steps 2000 \
-    # --checkpointing_steps 50 --train_ratio 0.01
-    # --add_lamm3d --add_scan2obj 
-
-    # --add_nr3d --add_scan2cap --add_sr3d --add_scenecap \
-
-    # --use_focus_bbox --add_lamm3d --add_scan2obj --add_nr3d --add_scan2cap --add_sqa3d --add_sr3d --add_scenecap \
-
-
-    # --pc_tokenizer_type "pointnet++" --use_multiview --use_height \
-
-
-    # --weight_decay_adapter 0.05 --weight_decay 0.05  \
-    # --lr "1e-4" --lr_adapter "1e-4" --lr_3d "0" \
-
-    # --use_focus_bbox --add_scan2obj --add_nr3d --add_scan2cap --add_sqa3d \
-    # --checkpointing_steps 2000 --use_dummy_image --num_think_tokens 16 --lr_3d "0" --use_focus_bbox
-    # --add_scan2obj --add_nr3d --add_scan2cap --add_sqa3d \
-    # --num_think_tokens 16 --lr_3d "0" --use_focus_bbox
-    # --use_dummy_image \
-    # --checkpointing_steps 300 --add_nr3d --add_scan2cap --use_focus_bbox --num_think_tokens 16 --use_dummy_image
-    # --add_scan2obj --add_nr3d --add_scan2cap --add_sr3d --add_sqa3d --num_think_tokens 16 --lr_3d "0"
-    # --lr_3d "0" \
-    # --shift_bbox_to_positive \
-    # 
-    # --unfreeze_word_embedding 
-    # --lr_3d "0"
-    # --add_nr3d --add_scan2cap --add_scan2obj --unfreeze_word_embedding
-    # --mnet_from_scratch --use_multiview \
-    # --lr_3d 0
-    # --mnet_from_scratch
-    # --mnet_from_scratch
-    # --mnet_from_scratch \
-    # --add_scan2obj --add_nr3d --add_scan2cap 
-    
-    # --add_sr3d \
-
-    # --mnet_from_scratch 
-    # --add_nr3d
-    # --add_scan2obj --add_nr3d \
-    # --restrict_vocab \
-
-# train scan2cap on scanrefer
-# accelerate launch --config_file "finetune-fuyu.yaml" --num_processes=$SLURM_GPUS --main_process_port=$PORT \
-#     train-fuyu-dc.py --lr "5e-5" --lr_adapter "5e-5" --lr_3d "1e-5" --weight_decay "0" --lora_rank 256 --epochs 3 --scheduler "cosine" \
-#     --batch_size 1 --gradient_accumulation_steps 2 --train_ratio 1 --num_workers 24 --verbose --gradient_clipping 1.0 \
-#     --use_3d --spatial_patch_size 24  --pooling_method "max" \
-#     --spatial_patch_size 32 --batch_size 1 --gradient_accumulation_steps 2 --lora_rank 256 \
-#     --dataset "scan2cap" \
-#     --generation_method "beam_search" --num_beams 5 --no_repeat_ngram_size 4 \
-
-    # --use_augment \
-    # --shift_bbox_to_positive \
-
-# train only the 3D and MLP alignment nets
-# accelerate launch --config_file "finetune-fuyu.yaml" --num_processes=$SLURM_GPUS --main_process_port=$PORT \
-#     train-fuyu-3d.py --lr "0" --lr_adapter "1e-5" --lr_3d "1e-5" --weight_decay "0" --lora_rank 0 --epochs 10 --scheduler "cosine" \
-#     --batch_size 2 --gradient_accumulation_steps 1 --train_ratio 1 --num_workers 8 --verbose --gradient_clipping 1.0 \
-#     --prompt "Answer the following ScanQA question based on the image and the 3D indoor scene:{}\x04 {}|ENDOFTEXT||ENDOFTEXT||ENDOFTEXT|" \
-#     --sqa_prompt "Currently my situation: {} Answer the following SQA3D question based on the situation, image and the 3D indoor scene:{}\x04 {}|ENDOFTEXT||ENDOFTEXT||ENDOFTEXT|" \
-#     --use_3d --spatial_patch_size 32 --pooling_method "max" \
-#     --dataset "scanqa_sqa" \
-
-    # --prompt "Answer the following ScanQA question based on the image and the 3D indoor scene:{}\x04 {}|ENDOFTEXT||ENDOFTEXT||ENDOFTEXT|" \
-    # --prompt "Answer the following ScanQA question:{}\x04 {}|ENDOFTEXT||ENDOFTEXT||ENDOFTEXT|" \
-    # --sqa_prompt "Currently my situation: {} Answer the following SQA3D question:{}\x04 {}|ENDOFTEXT||ENDOFTEXT||ENDOFTEXT|" \
-
-    # --prompt_config "config-fuyu.json"
-    # --dataset_type "scanqa+sqa" \
-
-
-# python kmichiru/upload.py
     

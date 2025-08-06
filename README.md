@@ -49,7 +49,7 @@ These paired views are selected only with the instruction text, without any acce
 1. Download pre-trained 3D detector from [Vote2Cap-DETR](ch3cook-fdu/Vote2Cap-DETR), or from our Huggingface Repo.
 2. Run the following command to extract 3D object features:
 ```bash
-# [TODO]
+./pre-extract-pnpp.sh
 ```
 
 
@@ -57,22 +57,34 @@ These paired views are selected only with the instruction text, without any acce
 1. 1st stage pre-train a 3D feature adapter on a subset of TripAlign dataset, with LVLM frozen:
 ```bash
 # [TODO]
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+./finetune_fuyu_1st_stage.sh
 ```
 NOTE: We found 1st stage pre-train makes only small difference on the final performance, so we recommend to skip this stage if you want to save time.
 2. 2nd stage pre-train the full model on the full TripAlign dataset, with LoRA:
 ```bash
-# [TODO]
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+./finetune_fuyu.sh
 ```
 
 ### Finetuning on Downstream Tasks
 We only found finetuning beneficial for MV-ScanQA and SQA3D, so we provide the finetuning code for these two tasks. For other tasks, we recommend to use the pre-trained model directly.
 ```bash
-# [TODO] MV-ScanQA finetuning
+# On MV-ScanQA
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+./finetune_fuyu_mvscanqa.sh
 ```
 ```bash
-# [TODO] SQA3D finetuning
+# On SQA3D
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+./finetune_fuyu_downstream.sh
 ```
 
+## Inference
+After acquiring trained checkpoints, you can run inference on downstream tasks. Here we provide the ScanQA inference command as an example. For other tasks, please change the dataset options in the shell script.
+```bash
+./predict_fuyu.sh
+```
 
 ## Acknowledgements
 We would like to thank [facebookresearch/votenet](https://github.com/facebookresearch/votenet) and [ch3cook-fdu/Vote2Cap-DETR](https://github.com/ch3cook-fdu/Vote2Cap-DETR) for the 3D object detectors.
