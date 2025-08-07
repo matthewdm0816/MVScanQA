@@ -1,6 +1,8 @@
 # _Advancing 3D Scene Understanding with MV-ScanQA Multi-View Reasoning Evaluation and TripAlign Pre-training Dataset_ - Official Codebase
 
-This work is accepeted by ACM MM 2025. [Project Page](matthewdm0816.github.io/mv-scanqa/)
+This work is accepeted by ACM MM 2025. [Demo & Project Page](matthewdm0816.github.io/mv-scanqa/)
+
+![Teasor](docs/teasor-mm-lego.svg)
 
 ## Installation
 0. Create a new conda environment if necessary.
@@ -27,6 +29,18 @@ For 2D views, please download from [ScanNet's sampled 2D views](http://kaldir.vc
 
 We provide final pre-trained LEGO checkpoints at [Another Huggingface Repo](https://huggingface.co/kmichiru/LEGO). 
 
+After data preparation, the directory structure should look like this:
+```
+<REPO_PARENT>/
+|--<SVC_PATH>/
+|  |--frames_square/  # ScanNet sampled 2D views
+|  |--...
+|--<REPO_PATH>/
+|  |--finetune_fuyu.sh
+|  |--finetune_fuyu_1st_stage.sh
+|  |--...
+```
+
 > **Note**: some scripts might require pre-trained checkpoints downloading, so please set `HF_ENDPOINT` or `ALL_PROXY` appropriately if necessary.
 
 ### Pre-compute View-Object IoSA ratios
@@ -34,7 +48,7 @@ IoSA (Intersection over Smallest Area) ratios between each view and each 3D obje
 ```bash
 # [TODO]
 ```
-This will generate a `scene_view_object_overlap_data.pkl` file that records the IoSA ratios between each view and each 3D object for each scene. This file is widely used for
+This will generate a `scene_view_object_overlap_data.pkl` file that records the IoSA ratios between each view and each 3D object for each scene. This file can be used for
 - visibility-based solvability analysis for current 3D vision-language datasets and our proposed two datasets.
 - selecting best views for each instruction for tasks with certain object as input (e.g. Scan2Cap on ScanRefer and Nr3D).
 
@@ -129,6 +143,7 @@ After acquiring trained checkpoints, you can run inference on downstream tasks. 
 - [ ] Fix file locations
 - [ ] Add view selection codes and docs.
 - [ ] Add gradient checkpointing for pre-training and finetuning, for low-memory GPUs like RTX 3090.
+- [ ] Update correct `accelerate+transformers+peft` versions in requirements.txt.
 
 ## Acknowledgements
 We would like to thank [facebookresearch/votenet](https://github.com/facebookresearch/votenet) and [ch3cook-fdu/Vote2Cap-DETR](https://github.com/ch3cook-fdu/Vote2Cap-DETR) for the 3D object detector code and pre-trained weights.
