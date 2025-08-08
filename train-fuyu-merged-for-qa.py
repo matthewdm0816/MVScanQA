@@ -206,6 +206,7 @@ def parse_args():
     parser.add_argument("--num_think_tokens", type=int, default=0)
     parser.add_argument("--use_focus_bbox", action="store_true")
     parser.add_argument("--remove_token_range", type=str, default="")
+    parser.add_argument("--gradient_checkpointing", action="store_true", help="Use gradient checkpointing to save memory, but slower training.")
 
     # Logging
     parser.add_argument("--verbose", action="store_true")
@@ -307,6 +308,57 @@ def get_model(args):
 
     model_id = f"{SVC_PATH}/fuyu-8b"
     processor = FuyuProcessor.from_pretrained(model_id)
+
+    tokenizer: LlamaTokenizerFast = processor.tokenizer
+    to_remove_token_ids = set()
+    tokenizer.pad_token = tokenizer.eos_token # |ENDOFTEXT|
+
+    model = Fuyu3DCausalLMv2(
+        pretrained_args={
+            "pretrained_model_name_or_path": model_id,
+            "torch_dtype": torch.bfloat16,
+        },
+        gradient_checkpointing=args.gradient_checkpointing,
+        mnet_path="/scratch/generalvision/mowentao/ScanQA/weights.pth",
+        pnpp_path="/scratch/generalvision/mowentao/SQA3D/ScanQA/outputs/2023-06-10_00-11-47_AUXI/model_last.pth",
+        vote2cap_detr_path="/scratch/generalvision/mowentao/ScanQA/LL3DA-main/pretrained/vote2cap-detr/scannet_vote2cap_detr_XYZ_COLOR_NORMAL.pth",
+        freeze_mnet=args.lr_3d <= 1e-8,
+        freeze_pnpp=args.lr_3d <= 1e-8,
+        freeze_vote2cap_detr=args.lr_3d <= 1e-8,
+        spatial_patch_size=args.spatial_patch_size,
+        pooling_method=args.pooling_method,
+        in_channels=in_channels,
+        num_think_tokens=args.num_think_tokens,
+        use_focus_bbox=args.use_focus_bbox,
+        adapter_type=args.adapter_type,
+        pc_tokenizer_type=args.pc_tokenizer_type,
+        num_query_tokens=args.num_query_tokens,
+        qformer_num_hidden_layers=args.qformer_num_hidden_layers,
+        pretrained_qformer=args.pretrained_qformer if args.use_pretrained_qformer else None,
+        vote2cap_return_type=args.vote2cap_return_type,
+        use_2d=not args.not_use_2d,
+        use_3d=not args.not_use_3d,
+        predict_frame_params=args.predict_frame_params,
+        coeff_frame_params=args.coeff_frame_params,
+        frozen_in_channels=args.frozen_in_channels,
+        merged_frozen_in_channels=args.merged_frozen_in_channels,
+        p_drop_2d=args.p_drop_2d,
+        p_drop_3d=args.p_drop_3d,
+        do_drop_2d_partial=args.do_drop_2d_partial,
+        p_drop_2d_partial_alpha=args.p_drop_2d_partial_alpha,
+        p_drop_2d_partial_beta=args.p_drop_2d_partial_beta,
+        keep_all_objects=args.keep_all_objects,
+        choose_related_objects=args.choose_related_objects,
+        trim_objects=not args.not_trim_objects,
+        iosa_threshold=args.iosa_threshold,
+        use_object_index_embedding=args.use_object_index_embedding,
+        use_object_textual_index=args.use_object_textual_index,
+        text_tokenizer=tokenizer,
+        added_object_tokens=args.added_object_tokens,
+        to_remove_token_ids=to_remove_token_ids,
+        use_grounding_classifier=args.use_grounding_classifier,
+        coeff_grounding_classifier=args.coeff_grounding_classifier,
+    )
 
     if not args.detector_from_scratch:
         model.load_detector()

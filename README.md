@@ -9,7 +9,9 @@ This work is accepeted by ACM MM 2025. [Demo & Project Page](matthewdm0816.githu
 1. Install `torch` 1.12 following [PyTorch official website](https://pytorch.org/get-started/locally/)
 2. Install related packages:
 ```bash
-pip install -r requirements.txt
+pip install -U pip
+pip install uv # we recommend using `uv` to speed up pip installation
+uv pip install -r requirements.txt
 ```
 3. Install Java to use METEOR evaluation package (for Scan2Cap evaluations).
 4. Download [our compiled data](https://huggingface.co/datasets/kmichiru/SVC), and change `SVC_PATH` in `fuyu_utils.py` to your downloaded path.
@@ -21,19 +23,23 @@ pip install -r requirements.txt
 ## Data Preparation
 We offer all converted data in this [Huggingface Repo](https://huggingface.co/datasets/kmichiru/SVC), including:
 - MV-ScanQA benchmark dataset and TripAlign pre-train datasets (generated captions for 2D views, and calculated instruction-view pairs for existing 3D vision-language datasets). We offer two versions of TripAlign: one with captions from LLaVA-1.5-7B, one with captions from GPT-4o.
+- Pre-processed ScanNet scene data, including the sampled point cloud and 3D object annotations.
 - pre-trained 3D detector from Vote2Cap-DETR and its pre-extracted 3D object features.
 - pre-trained 3D feature adapter from 1st stage pre-training.
 - pre-computed IoSA ratios between each view and each 3D object for ScanNet scenes.
 
-For 2D views, please download from [ScanNet's sampled 2D views](http://kaldir.vc.in.tum.de/3dsis/scannet_train_images.zip).
+For 2D views, please download from [ScanNet's sampled 2D views](http://kaldir.vc.in.tum.de/3dsis/scannet_train_images.zip). After downloading the compiled data, please unzip `scannet_data.zip` into `<SVC_PATH>/scannet_data/`, and unzip `scannet_train_images.zip` into `<SVC_PATH>/frames_square/`.
 
-We provide final pre-trained LEGO checkpoints at [Another Huggingface Repo](https://huggingface.co/kmichiru/LEGO). 
+For related files for view selection on detected object proposals from Mask3D, please download from LEO's [Data Repository](https://huggingface.co/datasets/huangjy-pku/LEO_data). Specifically, please download [Mask3D detection results on ScanNet](https://huggingface.co/datasets/huangjy-pku/LEO_data/resolve/main/mask.zip) and unzip under `<SVC_PATH>/save_mask` and [LEO's point cloud data](https://huggingface.co/datasets/huangjy-pku/LEO_data/resolve/main/pcd_with_global_alignment.zip) and unzip under `<SVC_PATH>/pcd_with_global_alignment`.
 
 After data preparation, the directory structure should look like this:
 ```
 <REPO_PARENT>/
 |--<SVC_PATH>/
-|  |--frames_square/  # ScanNet sampled 2D views
+|  |--frames_square/    # unzipped ScanNet sampled 2D views
+|  |--scannet_data/     # unzipped preprocessed ScanNet scene data
+|  |--save_mask/        # unzipped Mask3D detection results on ScanNet
+|  |--pcd_with_global_alignment/  # unzipped LEO's point cloud data
 |  |--...
 |--<REPO_PATH>/
 |  |--finetune_fuyu.sh
@@ -41,12 +47,14 @@ After data preparation, the directory structure should look like this:
 |  |--...
 ```
 
+We also provide final pre-trained LEGO checkpoints at [Another Huggingface Repo](https://huggingface.co/kmichiru/LEGO). 
+
 > **Note**: some scripts might require pre-trained checkpoints downloading, so please set `HF_ENDPOINT` or `ALL_PROXY` appropriately if necessary.
 
 ### Pre-compute View-Object IoSA ratios
 IoSA (Intersection over Smallest Area) ratios between each view and each 3D object are pre-computed for ScanNet scenes. To pre-compute them, run:    
 ```bash
-# [TODO]
+python data_utils/calculate_view_object_iosa_map.py
 ```
 This will generate a `scene_view_object_overlap_data.pkl` file that records the IoSA ratios between each view and each 3D object for each scene. This file can be used for
 - visibility-based solvability analysis for current 3D vision-language datasets and our proposed two datasets.
@@ -77,17 +85,24 @@ python data_utils/caption_by_api.py --directory <scannet_views_directory> --api_
 We found GPT-4o sourced captions are more accurate and detailed. We recommend using GPT-4o captions for better performance.
 
 ### TripAlign (3D+Text $\Rightarrow$ 2D): Extending Existing 3D Vision-Language Datasets with Paired Views
-For downstream tasks on existing 3D vision-language datasets, including ScanQA, SQA3D, Scan2Cap (on ScanRefer), and Scan2Cap (on Nr3D), run the following command to select views for instructions:
+For question answering downstream tasks on existing 3D vision-language datasets, including ScanQA and SQA3D, and our proposed MV-ScanQA, run the following command to select views for instructions:
 ```bash
 # QA datasets (ScanQA, SQA3D, MV-ScanQA)
 python data_utils/eval_scene_best_views.py --dataset (scanqa|sqa3d|scanqa_mv)
-# Dense Caption datasets (Scan2Cap on ScanRefer, Scan2Cap on Nr3D)
-# [TODO]
 ```
 This will generate an `i2t` file for each input dataset, which sorts the relevance of each view to each instruction. The `i2t` file is used to select the best views for each instruction. For MV-ScanQA, after selecting views, we further select multiple diverse and related views for each question by the following command:
 ```bash
 python data_utils/resample_views.py
 ```
+For dense captioning tasks, we select views for each object in the scene with following commands:
+```bash
+# Dense Caption datasets (Scan2Cap task on ScanRefer and Nr3D datasets)
+# For training (use ground truth object locations)
+python data_utils/calculate_object_centric_views.py
+# For evaluation/inference (use detected object proposals from Mask3D)
+python data_utils/calculate_object_centric_views_for_mask3d.py
+```
+
 > **Note**: 
 > - They're used in both pre-training stage and inference stage.
 > - Paired views are selected only with the instruction input (i.e., question text for question answering tasks, and object location for dense caption tasks), without any access to task response annotations. 
@@ -141,7 +156,7 @@ After acquiring trained checkpoints, you can run inference on downstream tasks. 
 - [x] Upload pre-trained 3D detector; Upload 1st stage pre-trained 3D feature adapter.
 - [ ] Re-test pre-training/finetuning scripts.
 - [ ] Fix file locations
-- [ ] Add view selection codes and docs.
+- [x] Add view selection codes and docs; Correct file locations.
 - [ ] Add gradient checkpointing for pre-training and finetuning, for low-memory GPUs like RTX 3090.
 - [ ] Update correct `accelerate+transformers+peft` versions in requirements.txt.
 

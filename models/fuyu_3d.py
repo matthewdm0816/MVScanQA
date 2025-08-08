@@ -514,6 +514,10 @@ class Fuyu3DCausalLMv2(FuyuPreTrainedModel, PCTokenizerAdapterMixin):
         # print kwargs without vocab
         print({k: v for k, v in kwargs.items() if k != "vocab"})
         self.fuyu: FuyuForCausalLM = FuyuForCausalLM.from_pretrained(**pretrained_args)
+
+        if kwargs.get("gradient_checkpointing", False):
+            print("Enabling gradient checkpointing for FuyuForCausalLM")
+            self.fuyu.gradient_checkpointing_enable(gradient_checkpointing_kwargs = {"use_reentrant": False})
         
         # inherit from FuyuForCausalLM
         self.config = self.fuyu.config
