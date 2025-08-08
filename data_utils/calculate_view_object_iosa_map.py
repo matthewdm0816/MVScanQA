@@ -10,7 +10,8 @@ import multiprocessing
 import pickle
 
 # %%
-DSET_VIEW_PATH = '/data/shared/frames_square/'
+DSET_VIEW_PATH = '../SVC/frames_square/'
+BBOX_PATH = '../SVC/scannet_data/'
 
 # %%
 def calculate_duplicate_over_smaller_area_ratio(bbox_pts_2d, h, w):
@@ -109,7 +110,7 @@ class View:
 
 # %%
 class ViewsData:
-    def __init__(self, scene_name, view_path='./', bbox_path='./scannet_data/', verbose=False):
+    def __init__(self, scene_name, view_path='./', bbox_path=BBOX_PATH, verbose=False):
         self.verbose = verbose
         self.scene_name = scene_name
         self.view_path = view_path

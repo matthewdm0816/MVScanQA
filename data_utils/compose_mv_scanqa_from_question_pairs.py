@@ -30,7 +30,7 @@ client = OpenAI(
 )
 
 SCANQA_QUESTION_PAIRS = {
-    split: json.load(open(f"./qa/ScanQA_question_pairs_{split}.json"))
+    split: json.load(open(f"../SVC/qa/ScanQA_question_pairs_{split}.json"))
     for split in ["train", "val"]
 }
 

@@ -19,6 +19,8 @@ from fuyu_utils import PointCloudProcessMixin, VisualInstructionTuningDataset3D
 # from models.fuyu_3d import detector
 from models.detector_Vote2Cap_DETR.detector import detector
 from typing import Tuple, List
+from iou3d import box3d_iou, get_minmax_corners, from_minmax_to_xyzhwl, get_3d_box, batch_get_minmax_corners, batch_from_minmax_to_xyzhwl
+import multiprocessing as mp
 
 logger = logging.getLogger(__name__)
 MEAN_COLOR_RGB = np.array([109.8, 97.2, 83.8])
@@ -208,8 +210,7 @@ def collate_fn(examples):
         "instance_bboxes": [e["instance_bboxes"] for e in examples]
     }
 
-from iou3d import box3d_iou, get_minmax_corners, from_minmax_to_xyzhwl, get_3d_box, batch_get_minmax_corners, batch_from_minmax_to_xyzhwl
-import multiprocessing as mp
+
 
 def worker(prediction, gts):
     iou_matrix = np.zeros(len(gts))

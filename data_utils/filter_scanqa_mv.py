@@ -95,7 +95,7 @@ def compute_and_filter_viewable_overlap(entries, overlap_threshold=0.5):
     if overlap_threshold == "":
         overlap_threshold = 0
 
-    with open('scene_view_object_overlap_data.pkl', 'rb') as f:
+    with open('../SVC/scene_view_object_overlap_data.pkl', 'rb') as f:
         scene_view_object_overlap_data = pickle.load(f) # scene_id -> view-object-overlap data
         
     processed_entries = []
@@ -220,7 +220,7 @@ def clean_annotation(entries):
     return cleaned_entries
 
 
-SRC_PATH = './qa/ScanQA_mv_{split}.json'
+SRC_PATH = '../SVC/qa/ScanQA_mv_{split}.json'
 OVERLAP_THRESHOLD = ""
 
 for split in ["train", "val"]:

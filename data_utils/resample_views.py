@@ -23,7 +23,7 @@ from typing import Dict, List, Tuple, Union, Any
 
 model_id = "ViT-H-14-378-quickgelu"
 pretrained = 'dfn5b'
-DSET_VIEW_PATH = '/data/shared/frames_square/'
+DSET_VIEW_PATH = '../SVC/frames_square/'
 
 # I2TFILE = 'scene_eval_decl_gpt3.5_aligned_scanqa_qonly_all_video_2.json'
 I2TFILE = 'scene_eval_scanqa_mv.pth'
@@ -36,8 +36,8 @@ I2TFILE = 'scene_eval_scanqa_mv.pth'
 # }
 
 annotation_filenames = {
-    'train': 'qa/ScanQA_mv_train_filtered_cleaned.json',
-    'val': 'qa/ScanQA_mv_val_filtered_cleaned.json',
+    'train': '../SVC/qa/ScanQA_mv_train_filtered_cleaned.json',
+    'val': '../SVC/qa/ScanQA_mv_val_filtered_cleaned.json',
 }
 
 def load_scene_images(scene_id):
@@ -48,15 +48,6 @@ def load_scene_images(scene_id):
         image = preprocess(image).cuda()
         images.append(image)
     return torch.stack(images)
-
-def chunked_forward(images, forward_fn, chunk_size=128):
-    image_chunks = torch.split(images, chunk_size)
-    image_features = []
-    # for chunk in tqdm(image_chunks):
-    for chunk in image_chunks:
-        with torch.no_grad():
-            image_features.append(forward_fn(chunk))
-    return torch.cat(image_features)
 
 
 def get_qid_images(i2t, qid, topk=20):

@@ -15,9 +15,9 @@ spacy
 nltk
 # pycocoevalcap
 
-peft
-transformers
-accelerate
+peft==0.13.2
+transformers==4.31.0
+accelerate==0.34.0
 Pillow==9.4.0
 # deepspeed
 numpy==1.24.2
@@ -30,3 +30,6 @@ toml
 pretty_errors
 flask
 openai
+scikit-learn
+scipy
+umap

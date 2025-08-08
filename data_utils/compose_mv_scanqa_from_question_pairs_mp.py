@@ -21,7 +21,7 @@ import random
 import multiprocessing
 from multiprocessing import Process, Queue
 
-from compose_mv_scanqa_from_question_pairs import compose_question_with_claude, client, format_multiple_answers, SCANQA_QUESTION_PAIRS
+from data_utils.compose_mv_scanqa_from_question_pairs import compose_question_with_claude, client, format_multiple_answers, SCANQA_QUESTION_PAIRS
 
 def worker(input_queue, output_queue):
     while True:
@@ -38,7 +38,7 @@ def main(split):
     random.seed(42)
     random.shuffle(SCANQA_QUESTION_PAIRS[split])
     sampled_pairs = SCANQA_QUESTION_PAIRS[split][:num_samples[split]]
-    OUTPUT_PATH = f'./qa/ScanQA_mv_{split}.json'
+    OUTPUT_PATH = f'../SVC/qa/ScanQA_mv_{split}.json'
 
     # read already processed pairs
     if os.path.exists(OUTPUT_PATH):

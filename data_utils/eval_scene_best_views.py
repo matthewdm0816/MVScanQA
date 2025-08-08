@@ -19,24 +19,9 @@ DSET_PATH_SQA = {
 }
 
 START_METHOD = "forkserver"
-# DSET_VIEWS_PATH = "/home/mowentao/data/ScanQA/data/rendered_images_new"
-# DSET_VIEWS_PATH = "/home/mowentao/data/ScanQA/data/scene_views_aligned"
+# DSET_VIEWS_PATH = "data/rendered_images_new"
+# DSET_VIEWS_PATH = "data/scene_views_aligned"
 DSET_VIEWS_PATH = f"{DATA_PATH}/../frames_square"
-
-# SCAN_NAMES = list(
-#     filter(
-#         lambda n: n.endswith("00"),
-#         sorted(
-#             [
-#                 line.rstrip()
-#                 for line in open(
-#                     "/home/mowentao/data/ScanQA/data/scannet/meta_data/scannetv2.txt"
-#                 )
-#             ]
-#         ),
-#     )
-# )
-SCENE_FEAT_PATH = "scene_blip_features.pkl"
 
 def is_dummy(answers):
     return len(answers) == 1 and answers[0] == ""
@@ -84,7 +69,12 @@ if __name__ == "__main__":
     sys.path.append(".")
     # sys.path.append("../bert-vqa")
     from multiprocessing.spawn import freeze_support
-    from utils_eval_blip import *
+    from utils.eval_blip import (
+        init_logger_nonddp,
+        seed_all,
+        preprocess,
+        SceneViewsPool,
+    )
     from copy import copy, deepcopy
 
     freeze_support()
@@ -203,31 +193,11 @@ if __name__ == "__main__":
     logger.info(f"Total {len(SCAN_NAMES)} scenes.")
 
 
-
-    feature_exists = os.path.exists(SCENE_FEAT_PATH)
-    if True or not feature_exists:
-        # --- Load views
-        # def load_images(img_path):
-        #     images = {}
-        #     logging.info("Loading Images...")
-
-        #     for scan_name in tqdm(SCAN_NAMES):
-        #         images[scan_name] = {}
-        #         p = os.path.join(img_path, scan_name)
-        #         for filename in glob.glob(f"{p}/*.jpg"):
-        #             img_name = os.path.basename(filename)
-        #             img = Image.open(filename).convert("RGB")
-        #             if not isblank(img, 0.7):
-        #                 images[scan_name][img_name] = preprocess(img)
-        #     return images
-
-        # images = load_images(DSET_VIEWS_PATH)
-        pool = SceneViewsPool(args.dset_views_path, SCAN_NAMES, preprocess=preprocess, nocheck_blank=args.nocheck_blank)
-        images = pool.images
+    # --- Load Images
+    pool = SceneViewsPool(args.dset_views_path, SCAN_NAMES, preprocess=preprocess, nocheck_blank=args.nocheck_blank)
+    images = pool.images
 
     # --- Init BLIP Model
-    from models.blip import blip_decoder
-    from models.blip_pretrain import blip_pretrain
     from models.blip_itm import blip_itm
     from models.blip_vqa import blip_vqa
 
@@ -259,27 +229,23 @@ if __name__ == "__main__":
     model.eval()
     model = model.to(device)
 
-    if not feature_exists:
-        # --- Encode BLIP image features
-        def encode_feature(model_image, images):
-            logging.info("Beginning Encoding Images...")
-            image_feat_dict = {}
-            for scan_name, img_dict in tqdm(images.items()):
-                dataloader = DataLoader(list(img_dict.items()), batch_size=256)
-                image_feat_dict[scan_name] = {}
-                with torch.no_grad():
-                    for batch in dataloader:
-                        img_names, images = batch
-                        images = images.to(device)
-                        image_embeds: torch.Tensor = model_image(images).to(device)
-                        for i, img_name in enumerate(img_names):
-                            image_feat_dict[scan_name][img_name] = image_embeds[i].cpu()
-            return image_feat_dict
+    # --- Encode BLIP image features
+    def encode_feature(model_image, images):
+        logging.info("Beginning Encoding Images...")
+        image_feat_dict = {}
+        for scan_name, img_dict in tqdm(images.items()):
+            dataloader = DataLoader(list(img_dict.items()), batch_size=256)
+            image_feat_dict[scan_name] = {}
+            with torch.no_grad():
+                for batch in dataloader:
+                    img_names, images = batch
+                    images = images.to(device)
+                    image_embeds: torch.Tensor = model_image(images).to(device)
+                    for i, img_name in enumerate(img_names):
+                        image_feat_dict[scan_name][img_name] = image_embeds[i].cpu()
+        return image_feat_dict
 
-        image_feat_dict = encode_feature(model.visual_encoder, images)
-        # torch.save(image_feat_dict, SCENE_FEAT_PATH)
-    else:
-        image_feat_dict = torch.load(open(SCENE_FEAT_PATH, "rb"))
+    image_feat_dict = encode_feature(model.visual_encoder, images)
 
     # --- Prediction
     # dset = datasets.concatenate_datasets([dset[split] for split in args.split])
@@ -409,23 +375,6 @@ if __name__ == "__main__":
                         for i in range(batch_size):
                             answers.append(all_answers[max_ids[i].item()])
 
-                        # answers += [
-                        #     all_answers[ans_idx[i][sorted_idx[i][0]].item()]
-                        #     for i in range(ans_idx.size(0))
-                        # ]
-
-                        # max_ids = model_vqa(
-                        #     best_views[s : s + bsz],
-                        #     questions[s : s + bsz],
-                        #     train=False,
-                        #     inference="rank",
-                        #     answer=all_answers,
-                        # )
-
-                        # answers += [
-                        #     all_answers[max_ids[i].item()]
-                        #     for i in range(max_ids.size(0))
-                        # ]
 
                     gt_answers = dset_scan["answers"]
                     # if not (len(gt_answers) == 1 and gt_answers[0] == ""):
@@ -449,7 +398,6 @@ if __name__ == "__main__":
         logging.info(f"total {total}, correct {correct}, acc@1 {correct / total * 100:.2f}")
     # --- Save prediction
     if not args.dryrun:
-        # json.dump({"view": pred, "answer": pred_answer, "itm_scores": itm_scores}, open(args.outfile, "w"))
         torch.save({"view": pred, "answer": pred_answer, "itm_scores": itm_scores}, args.outfile)
 
     logging.info("Finished Prediction")
