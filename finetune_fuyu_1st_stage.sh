@@ -9,6 +9,8 @@ echo "Number of processes (GPUs): $SLURM_GPUS"
 
 export PORT=$(shuf -i 29000-30000 -n 1)
 
+ulimit -n 1024000
+
 # <> JOINT PRETRAIN
 accelerate launch --config_file "finetune-fuyu.yaml" --num_processes=$SLURM_GPUS --main_process_port=$PORT \
     train-fuyu-merged-for-qa.py --scheduler "cosine" \

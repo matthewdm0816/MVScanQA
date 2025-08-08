@@ -24,9 +24,9 @@ uv pip install -r requirements.txt
 We offer all converted data in this [Huggingface Repo](https://huggingface.co/datasets/kmichiru/SVC), including:
 - MV-ScanQA benchmark dataset and TripAlign pre-train datasets (generated captions for 2D views, and calculated instruction-view pairs for existing 3D vision-language datasets). We offer two versions of TripAlign: one with captions from LLaVA-1.5-7B, one with captions from GPT-4o.
 - Pre-processed ScanNet scene data, including the sampled point cloud and 3D object annotations.
-- pre-trained 3D detector from Vote2Cap-DETR and its pre-extracted 3D object features.
-- pre-trained 3D feature adapter from 1st stage pre-training.
-- pre-computed IoSA ratios between each view and each 3D object for ScanNet scenes.
+- Pre-trained 3D detector from Vote2Cap-DETR and its pre-extracted 3D object features.
+- Pre-trained 3D feature adapter from 1st stage pre-training.
+- Pre-computed IoSA ratios between each view and each 3D object for ScanNet scenes.
 
 For 2D views, please download from [ScanNet's sampled 2D views](http://kaldir.vc.in.tum.de/3dsis/scannet_train_images.zip). After downloading the compiled data, please unzip `scannet_data.zip` into `<SVC_PATH>/scannet_data/`, and unzip `scannet_train_images.zip` into `<SVC_PATH>/frames_square/`.
 
@@ -165,11 +165,12 @@ Once LEGO is trained, you can run inference on downstream tasks. Here we provide
 ## TODO
 - [x] Upload pre-trained checkpoints; Upload scene-view-object IoSA ratios.
 - [x] Upload pre-trained 3D detector; Upload 1st stage pre-trained 3D feature adapter.
-- [ ] Re-test pre-training/finetuning scripts.
-- [ ] Fix file locations
+- [x] Fix file locations
 - [x] Add view selection codes and docs; Correct file locations.
 - [x] Add gradient checkpointing for pre-training and finetuning, for low-memory GPUs like RTX 3090.
 - [x] Update correct `accelerate+transformers+peft` versions in requirements.txt.
+- [ ] Test cleaned scripts.
+
 
 ## Acknowledgements
 We would like to thank [facebookresearch/votenet](https://github.com/facebookresearch/votenet) and [ch3cook-fdu/Vote2Cap-DETR](https://github.com/ch3cook-fdu/Vote2Cap-DETR) for the 3D object detector code and pre-trained weights.

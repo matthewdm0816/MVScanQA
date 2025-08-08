@@ -1,48 +1,4 @@
 #!/bin/bash
-#SBATCH --job-name=🌰kuri  # create a short name for your job
-
-##SBATCH --partition=gpu   # specify the partition name: gpu 
-##SBATCH --qos=gpu
-##SBATCH --account=research
-
-##SBATCH --partition=gpu
-#SBATCH --qos=lv4
-#SBATCH --time=10:00:00 
-#SBATCH --account=research
-
-#SBATCH --nodes=1                # node count
-#SBATCH --ntasks=1              # total number of tasks across all nodes
-#SBATCH --ntasks-per-node=1
-#SBATCH --mem=300G   # total memory (RAM) per node
-
-#SBATCH --cpus-per-task=64    # cpu-cores per task (>1 if multi-threaded tasks)
-#SBATCH --gres=gpu:8 # number of gpus per node
-#SBATCH --output=kuri-logs/isft-%j.out  # output format
-#SBATCH --error=kuri-logs/isft-%j.out  # error output file
-#SBATCH --exclude=hgx-hyperplane[00]
-##SBATCH --exclude=hgx-hyperplane[02,06,08]
-##SBATCH --exclude=dgx-hyperplane12
-export MACA_PATH=/opt/maca
-export CUCC_PATH=${MACA_PATH}/tools/cu-bridge
-export CUDA_PATH=${CUCC_PATH}
-export MACA_CLANG_PATH=${MACA_PATH}/mxgpu_llvm/bin
-export PATH=${CUDA_PATH}/bin:${MACA_CLANG_PATH}:${PATH}
-export LD_LIBRARY_PATH=${MACA_PATH}/lib:${MACA_PATH}/mxgpu_llvm/lib:${LD_LIBRARY_PATH}
-export MACA_SMALL_PAGESIZE_ENABLE=1
-export PYTORCH_ENABLE_SAME_SAME_RAND_A100=1
-export SET_DEVICE_NUMA_PREFERRED=1
-export MCCL_P2P_LEVEL=SYS
-export MCCL_FAST_WRITE_BACK=1
-export MCCL_EARLY_WRITE_BACK=15
-export MCCL_NET_GDR_LEVEL=SYS
-export MCCL_CROSS_NIC=1
-export MHA_BWD_NO_ATOMIC_F64=1
-
-# Workding Dir.
-# cd /home/mowentao/data/ScanQA/
-# export ALL_PROXY='http://10.141.0.110:17893'
-# cd /scratch/generalvision/mowentao/ScanQA
-# module load cuda11.7
 export LANG=en_US.UTF-8
 export OMP_NUM_THREADS=8
 
@@ -53,10 +9,8 @@ echo "Number of processes (GPUs): $SLURM_GPUS"
 
 export PORT=$(shuf -i 29000-30000 -n 1)
 export TOKENIZERS_PARALLELISM=false
-# export MACA_LAUNCH_BLOCKING=1
-export MCCL_ENABLE_FC=0
 
-mx-smi # Show the GPU information.
+ulimit -n 1024000
 
 # <> JOINT PRETRAIN
 accelerate launch --config_file "finetune-fuyu.yaml" --num_processes=$SLURM_GPUS --main_process_port=$PORT \

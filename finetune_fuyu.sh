@@ -8,7 +8,7 @@ export SLURM_GPUS=$(($(echo $CUDA_VISIBLE_DEVICES | tr -cd , | wc -c)+1))
 echo "Number of processes (GPUs): $SLURM_GPUS"
 
 export PORT=$(shuf -i 29000-30000 -n 1)
-
+ulimit -n 1024000
 
 # <> FINETUNE
 # /scratch/generalvision/mowentao/kuri3d-output/fuyu-8b-scanqa-2024-03-15-12-29-2024-03-15-12-29/ckpt-87822

@@ -1,5 +1,5 @@
 import transformers
-from transformers import FuyuProcessor, FuyuForCausalLM, AutoModelForCausalLM, FuyuConfig, AutoTokenizer, BertTokenizer, LlamaTokenizerFast
+from transformers import FuyuProcessor, FuyuForCausalLM, AutoModelForCausalLM, FuyuConfig, AutoTokenizer, BertTokenizer, LlamaTokenizerFast, Adafactor
 from PIL import Image
 import os
 import torch
@@ -207,6 +207,7 @@ def parse_args():
     parser.add_argument("--use_focus_bbox", action="store_true")
     parser.add_argument("--remove_token_range", type=str, default="")
     parser.add_argument("--gradient_checkpointing", action="store_true", help="Use gradient checkpointing to save memory, but slower training.")
+    parser.add_argument("--use_adafactor", action="store_true", help="Use Adafactor optimizer instead of AdamW. Lower memory usage.")
 
     # Logging
     parser.add_argument("--verbose", action="store_true")
@@ -785,21 +786,6 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
         )
         datasets.append(scanrefer_sr3d_dataset)
     
-    if args.use_dummy_image:
-        for dataset in datasets:
-            dataset.image_getter = dummy_image_getter
-
-    if args.use_dummy_image_for_scan2cap:
-        if scan2cap_dataset is not None:
-            scan2cap_dataset.image_getter = dummy_image_getter
-        if scan2obj_dataset is not None:
-            scan2obj_dataset.image_getter = dummy_image_getter
-        if scan2cap_nr3d_dataset is not None:
-            scan2cap_nr3d_dataset.image_getter = dummy_image_getter
-        if scan2cap_sr3d_dataset is not None:
-            scan2cap_sr3d_dataset.image_getter = dummy_image_getter
-
-    
     # merge datasets
     train_dataset = MergedDataset(
         datasets=datasets,
@@ -982,11 +968,6 @@ def get_trainval_datasets(args) -> dict[str, Dataset]:
     else:
         val_dataset_scanrefer_sr3d = None
     
-    if args.use_dummy_image_for_scan2cap:
-        val_dataset_scan2cap.image_getter = dummy_image_getter
-        val_dataset_scan2cap_gt.image_getter = dummy_image_getter
-        val_dataset_nr3d.image_getter = dummy_image_getter
-
 
     # answer vocab
     if args.add_scanqa:
@@ -1293,7 +1274,14 @@ def get_optimizer_scheduler(args, model):
     )
     optimizer_grouped_parameters = list(optimizer_param_groups_dict.values())
     logger.info(optimizer_grouped_parameter_names)
-    optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.lr, weight_decay=args.weight_decay)
+
+    if args.use_adafactor:
+        optimizer = Adafactor(optimizer_grouped_parameters, 
+                                scale_parameter=False, relative_step=False, warmup_init=False,
+                                lr=args.lr,
+                                weight_decay=args.weight_decay)
+    else:
+        optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.lr, weight_decay=args.weight_decay)
 
     # scheduler
     if args.scheduler == "linear":
@@ -1372,7 +1360,7 @@ def train(args, epoch):
                         "train/grounding_acc_softmax": grounding_acc_softmax,
                     })
 
-            if args.gradient_clipping > 1e-8:
+            if args.gradient_clipping > 1e-8 and not args.use_adafactor: # Adafactor does not need gradient clipping
                 if accelerator.sync_gradients:
                     accelerator.clip_grad_norm_(model.parameters(), args.gradient_clipping)
             args.optimizer.step()
@@ -1745,7 +1733,8 @@ if __name__ == "__main__":
     args.generation_config["pad_token_id"] = processor.tokenizer.pad_token_id
     
     # init instructblip tokenizer
-    qtokenizer: BertTokenizer = BertTokenizer.from_pretrained(args.pretrained_qformer)
+    # qtokenizer: BertTokenizer = BertTokenizer.from_pretrained(args.pretrained_qformer)
+    qtokenizer: BertTokenizer = BertTokenizer.from_pretrained("bert-base-uncased") # no need to download whole model
     args.qtokenizer = qtokenizer
 
     logger.info(f"Total {len(args.datasets['train'])} training samples.")

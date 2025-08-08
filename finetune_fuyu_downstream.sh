@@ -11,6 +11,8 @@ echo "Number of processes (GPUs): $SLURM_GPUS"
 export PORT=$(shuf -i 29000-30000 -n 1)
 export TOKENIZERS_PARALLELISM=false
 
+ulimit -n 1024000
+
 # <> FINETUNE
 accelerate launch --config_file "finetune-fuyu.yaml" --num_processes=$SLURM_GPUS --main_process_port=$PORT \
     train-fuyu-merged-for-qa.py --lr "5e-5" --lr_adapter "5e-5" --lr_3d "1e-5" --weight_decay "0" --scheduler "cosine" \
