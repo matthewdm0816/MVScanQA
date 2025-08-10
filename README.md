@@ -20,8 +20,21 @@ uv pip install -r requirements.txt
 
 ## Results
 
-## Data Preparation
-We offer all converted data in this [Huggingface Repo](https://huggingface.co/datasets/kmichiru/SVC), including:
+## Quickstart
+
+> **Note**: You can download the compiled data and checkpoints in the table below. 
+Unzip and organize according to the guide below, and you're ready to go LEGO [Training](#training) and [Inference](#inference)!
+
+| Component | Link |
+| --- | --- |
+| Compiled Data "SVC" | [Download](https://huggingface.co/datasets/kmichiru/SVC) |
+| ScanNet 2D Views | [Download](http://kaldir.vc.in.tum.de/3dsis/scannet_train_images.zip) |
+| Pre-Trained LEGO Checkpoint | [Download](https://huggingface.co/kmichiru/LEGO) |
+| Mask3D Detection Results | [Download](https://huggingface.co/datasets/huangjy-pku/LEO_data/resolve/main/mask.zip) |
+| LEO's Pre-processed Point Clouds (Only needed for data preparation) | [Download](https://huggingface.co/datasets/huangjy-pku/LEO_data/resolve/main/pcd_with_global_alignment.zip) |
+
+
+We offer all pre-converted data in this [SVC Data Repo](https://huggingface.co/datasets/kmichiru/SVC), including:
 - MV-ScanQA benchmark dataset and TripAlign pre-train datasets (generated captions for 2D views, and calculated instruction-view pairs for existing 3D vision-language datasets). We offer two versions of TripAlign: one with captions from LLaVA-1.5-7B, one with captions from GPT-4o.
 - Pre-processed ScanNet scene data, including the sampled point cloud and 3D object annotations.
 - Pre-trained 3D detector from Vote2Cap-DETR and its pre-extracted 3D object features.
@@ -41,7 +54,7 @@ After data preparation, the directory structure should look like this:
 |  |--save_mask/        # unzipped Mask3D detection results on ScanNet
 |  |--pcd_with_global_alignment/  # unzipped LEO's point cloud data
 |  |--...
-|--<REPO_PATH>/
+|--<REPO_PATH>/         # cloned this repository
 |  |--finetune_fuyu.sh
 |  |--finetune_fuyu_1st_stage.sh
 |  |--...
@@ -49,7 +62,10 @@ After data preparation, the directory structure should look like this:
 
 We also provide final pre-trained LEGO checkpoints at [Another Huggingface Repo](https://huggingface.co/kmichiru/LEGO). 
 
+
 > **Note**: some scripts might require pre-trained checkpoints downloading, so please set `HF_ENDPOINT` or `ALL_PROXY` appropriately if necessary.
+
+## Data Preparation
 
 ### Pre-compute View-Object IoSA ratios
 IoSA (Intersection over Smallest Area) ratios between each view and each 3D object are pre-computed for ScanNet scenes. To pre-compute them, run:    
@@ -170,6 +186,7 @@ Once LEGO is trained, you can run inference on downstream tasks. Here we provide
 - [x] Add gradient checkpointing for pre-training and finetuning, for low-memory GPUs like RTX 3090.
 - [x] Update correct `accelerate+transformers+peft` versions in requirements.txt.
 - [ ] Test cleaned scripts.
+- [ ] Update inference for each dataset
 
 
 ## Acknowledgements
