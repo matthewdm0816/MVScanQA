@@ -186,7 +186,7 @@ Once LEGO is trained, you can run inference on downstream tasks. Here we provide
 - [x] Add gradient checkpointing for pre-training and finetuning, for low-memory GPUs like RTX 3090.
 - [x] Update correct `accelerate+transformers+peft` versions in requirements.txt.
 - [ ] Test cleaned scripts.
-- [ ] Update inference for each dataset
+- [ ] Update inference for each dataset.
 
 
 ## Acknowledgements

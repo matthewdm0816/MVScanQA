@@ -15,7 +15,7 @@ accelerate launch --config_file "finetune-fuyu.yaml" --num_processes=$SLURM_GPUS
     --train_ratio 1 --num_workers 24 --verbose --gradient_clipping 1.0 \
     --use_3d --pooling_method "max" \
     --spatial_patch_size 24 --batch_size 2 --gradient_accumulation_steps 2 --lora_rank 128 --lora_alpha 256 \
-    --generation_method "beam_search" --num_beams 5 --eval_batch_size 2 \
+    --generation_method "beam_search" --num_beams 5 --eval_batch_size 1 \
     --finetune_epochs 0 --epochs 0 \
     --adapter_type ffn --num_query_tokens 128 --qformer_num_hidden_layers 12 --vote2cap_return_type "box_features" \
     --pc_tokenizer_type frozen --frozen_object_type "pnpp-vote2cap-box" \
@@ -28,5 +28,7 @@ accelerate launch --config_file "finetune-fuyu.yaml" --num_processes=$SLURM_GPUS
     --add_scanqa --clean_qa_answer \
     --lora_rank_finetune 4 --lora_alpha_finetune 8 --lora_dropout_finetune 0.05 --trainable_lora_in_finetune \
     --checkpointing_steps 0.2  --prompt_end_token "|ENDOFTEXT|" \
-    --checkpoint_path ../kuri3d-output/fuyu-8b-scanqa-2024-11-03-18-51-2024-11-03-18-51/best-scan2cap_CiDEr@0.5 \
+    --checkpoint_path ckpts/best-scan2cap_CiDEr@0.5 \
     2>&1 | tee ../kuri-logs/log-prediction-$(date +'%Y-%m-%d-%H-%M-%S').log
+
+    # --checkpoint_path ../kuri3d-output/fuyu-8b-scanqa-2024-11-03-18-51-2024-11-03-18-51/best-scan2cap_CiDEr@0.5 \
