@@ -187,6 +187,7 @@ Once LEGO is trained, you can run inference on downstream tasks. Here we provide
 - [x] Update correct `accelerate+transformers+peft` versions in requirements.txt.
 - [ ] Test cleaned scripts.
 - [ ] Update inference for each dataset.
+- [ ] Update bibtex.
 
 
 ## Acknowledgements
@@ -195,6 +196,11 @@ We would like to thank [facebookresearch/votenet](https://github.com/facebookres
 ## Citation
 If you find this codebase useful, please consider citing our work:
 ```bibtex
+@inproceedings{mo2025mvscanqa,
+  title={Advancing 3D Scene Understanding with MV-ScanQA Multi-View Reasoning Evaluation and TripAlign Pre-training Dataset},
+  author={Mo, Wentao and Chen, QingChao and Peng, Yuxin and Huang, Siyuan and Liu, Yang},
+  year={2025},
+}
 ```
 
 ## License
