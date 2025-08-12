@@ -5,13 +5,17 @@ This work is accepeted by ACM MM 2025. [Demo & Project Page](matthewdm0816.githu
 ![Teasor](docs/teasor-mm-lego.svg)
 
 ## Installation
-0. Create a new conda environment if necessary.
-1. Install `torch` 1.12 following [PyTorch official website](https://pytorch.org/get-started/locally/)
-2. Install related packages:
+0. Create a new conda environment if necessary with `python` 3.12.
+1. Install  `torch` 2.1 following [PyTorch official website](https://pytorch.org/get-started/locally/), and related packages:
 ```bash
 pip install -U pip
 pip install uv # we recommend using `uv` to speed up pip installation
+uv pip install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cu121 # Example torch installation
 uv pip install -r requirements.txt
+```
+2. (Optional) Adjust `transformers` version for stable replication in pre-training:
+```bash
+pip install transformers==4.35 tokenizers==0.14 --no-deps
 ```
 3. Install Java to use METEOR evaluation package (for Scan2Cap evaluations).
 4. Download [our compiled data](https://huggingface.co/datasets/kmichiru/SVC), and change `SVC_PATH` in `fuyu_utils.py` to your downloaded path.
@@ -19,6 +23,18 @@ uv pip install -r requirements.txt
 
 
 ## Results
+
+Here are reproduced results from this cleaned script.
+| Dataset                                | Results (Cleaned) | Results (Reported)
+| -------------------------------------- | ------- | --- |
+| ScanQA (val), EM                       | 28.0    | 28.4    |
+| ScanQA (test with object), EM          |         | 33.7    |
+| ScanQA (test without object), EM       |         | 32.7  |
+| Scan2Cap (on ScanRefer), CiDER@0.25    | 82.8    | 84.7   |
+| Scan2Cap (on ScanRefer), CiDER@0.5     | 76.7    | 78.6   |
+| Scan2Cap (on Nr3D), CiDER@0.5          | 62.3    | 61.4   |
+| MV-ScanQA, EM                          |         | 34.1   |
+| SQA3D, EM                              |         |         |
 
 ## Quickstart
 
@@ -132,6 +148,8 @@ python data_utils/calculate_object_centric_views_for_mask3d.py
 
 ## Training
 
+> **Note**: Typically you need 40G VRAM to run training.
+
 ### Pre-extract 3D Object Features
 1. Download pre-trained 3D detector from [Vote2Cap-DETR](ch3cook-fdu/Vote2Cap-DETR), or from our compiled Huggingface repository.
 2. Compile and install PointNet++:
@@ -177,6 +195,8 @@ Once LEGO is trained, you can run inference on downstream tasks. Here we provide
 ```bash
 ./predict_fuyu.sh --checkpoint_path <checkpoint_path>
 ```
+
+> **Note**: For ScanQA test splits performances, you need to submit the result files to its official [eval.ai evaluation platform](https://eval.ai/web/challenges/challenge-page/1715/overview).
 
 ## TODO
 - [x] Upload pre-trained checkpoints; Upload scene-view-object IoSA ratios.

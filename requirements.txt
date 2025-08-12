@@ -15,12 +15,12 @@ spacy
 nltk
 # pycocoevalcap
 
-peft==0.13.2
-transformers==4.35
-accelerate==0.34
+peft==0.11.0
+transformers==4.35.2
+accelerate==0.24.0
 Pillow==9.4.0
 # deepspeed
-numpy==1.24.2
+numpy<2
 networkx==3.0
 icecream
 shapely
