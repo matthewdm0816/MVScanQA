@@ -303,6 +303,7 @@ def parse_args():
 
     # Finetune
     parser.add_argument("--checkpoint_path", type=str, default="")
+    parser.add_argument("--base_model", type=str, default="", help="Used for inference pre-train then finetune models")
     parser.add_argument("--trainable_lora_in_finetune", action="store_true")
     parser.add_argument("--create_new_lora_for_finetune", action="store_true")
     parser.add_argument("--validate_at_start", action="store_true")
@@ -440,15 +441,31 @@ def get_peft_fuyu(model, args):
         # load checkpoint
         if args.checkpoint_path != "" and not args.only_load_adapter:
             logger.info(f"Loading LoRA checkpoint from {args.checkpoint_path}...")
-            # model.load_pretrained(args.checkpoint_path)
-            # from peft import AutoPeftModel, AutoPeftModelForCausalLM
-            # model.fuyu = AutoPeftModelForCausalLM.from_pretrained(args.checkpoint_path, is_trainable=args.trainable_lora_in_finetune)
+
+            if args.base_model != "":
+                # loading base LoRA
+                logger.info(f"Loading base LoRA from {args.base_model}...")
+                message = model.fuyu.load_adapter(
+                    model_id=args.base_model,
+                    adapter_name="default",
+                    is_trainable=args.trainable_lora_in_finetune,
+                )
+                logger.info(message)
+                # merge and unload
+                original_device = model.fuyu.device
+                model.fuyu = model.fuyu.cuda()
+                model.fuyu = model.fuyu.merge_and_unload(progressbar=True)
+                model.fuyu = model.fuyu.to(original_device)
+
+
             message = model.fuyu.load_adapter(
                 model_id=args.checkpoint_path,
                 adapter_name="default",
                 is_trainable=args.trainable_lora_in_finetune,
             )
             logger.info(message)
+
+            
 
             if args.create_new_lora_for_finetune:
                 # logger.info(f"Merging adapters...")

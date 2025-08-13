@@ -1,6 +1,6 @@
 # _Advancing 3D Scene Understanding with MV-ScanQA Multi-View Reasoning Evaluation and TripAlign Pre-training Dataset_ - Official Codebase
 
-This work is accepted by ACM MM 2025. [Demo & Project Page](matthewdm0816.github.io/tripalign-mvscanqa/)
+This work is accepted by ACM MM 2025. [Demo & Project Page](https://matthewdm0816.github.io/tripalign-mvscanqa/)
 
 ![Teasor](docs/teasor-mm-lego.svg)
 
@@ -28,7 +28,7 @@ uv pip install -r requirements.txt
     | --- | --- | --- |
     | Compiled Data "SVC" | [Download](https://huggingface.co/datasets/kmichiru/SVC) | Our pre-processed datasets, features and annotations. |
     | ScanNet 2D Views | [Download](http://kaldir.vc.in.tum.de/3dsis/scannet_train_images.zip) | Original 2D views from ScanNet. |
-    | Pre-Trained LEGO Checkpoint | [Download](https://huggingface.co/kmichiru/LEGO) | Our pre-trained model checkpoints. |
+    | Pre-Trained LEGO Checkpoint | [Download](https://huggingface.co/kmichiru/LEGO/tree/main/best-pretrained-reproduced) | Our pre-trained model checkpoints. |
     | Mask3D Detection Results | [Download](https://huggingface.co/datasets/huangjy-pku/LEO_data/resolve/main/mask.zip) | Needed for inference on dense captioning tasks. |
     | LEO's Point Clouds | [Download](https://huggingface.co/datasets/huangjy-pku/LEO_data/resolve/main/pcd_with_global_alignment.zip) | Only needed if you run data preparation from scratch. |
 
@@ -55,13 +55,13 @@ Here are the reproduced results from running this cleaned script.
 | Dataset                                | Results (Reproduced) | Results (Reported)
 | -------------------------------------- | ------- | --- |
 | ScanQA (val), EM                       | 28.3    | 28.4   |
-| ScanQA (test with object), EM          |         | 33.7   |
-| ScanQA (test without object), EM       |         | 32.7   |
+| ScanQA (test with object), EM          | [N/A due to eval.ai outage]    | 33.7   |
+| ScanQA (test without object), EM       | [N/A due to eval.ai outage]    | 32.7   |
 | Scan2Cap (on ScanRefer), CiDER@0.25    | 83.9    | 84.7   |
 | Scan2Cap (on ScanRefer), CiDER@0.5     | 78.0    | 78.6   |
 | Scan2Cap (on Nr3D), CiDER@0.5          | 62.8    | 61.4   |
-| MV-ScanQA, EM                          |         | 34.1   |
-| SQA3D, EM                              |         |  -     |
+| MV-ScanQA, EM                          | 33.7    | 34.1   |
+<!-- | SQA3D, EM                              |         |  -     | -->
 
 ## Data Preparation (Optional)
 
@@ -92,8 +92,8 @@ We use pre-trained LVLMs to generate captions for the TripAlign dataset. We prov
 ```bash
 # For LLaVA-1.5-7B captions. Replace `SVC_PATH` in the script first.
 python data_utils/caption_scannet_mt.py --scene_range 0-10000
-# [TODO: clean&update view selection code]
-
+```
+```bash
 # For GPT-4o captions. Tweak base_url and model_name in the script if needed.
 python data_utils/caption_by_api.py --directory <scannet_views_directory> --api_key <your_openai_api_key>
 ```
@@ -157,12 +157,13 @@ We found finetuning to be beneficial for MV-ScanQA and SQA3D. For other tasks, w
 ```bash
 # On MV-ScanQA
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
-./finetune_fuyu_mvscanqa.sh
+./finetune_fuyu_mvscanqa.sh --checkpoint_path <path_to_pretrained_checkpoint>
 
 # On SQA3D
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
-./finetune_fuyu_downstream.sh
+./finetune_fuyu_downstream.sh --checkpoint_path <path_to_pretrained_checkpoint>
 ```
+We also provide finetuned checkpoint for MV-ScanQA [here](https://huggingface.co/kmichiru/LEGO/tree/main/best-scanqa-mv_em).
 
 ## Inference
 Once LEGO is trained, you can run inference on downstream tasks. Below are example commands. Please change the dataset options in the shell scripts as needed.
@@ -175,11 +176,14 @@ Once LEGO is trained, you can run inference on downstream tasks. Below are examp
 ./predict_fuyu.sh --checkpoint_path <path_to_checkpoint> --add_scan2cap
 # Scan2Cap (Nr3D)
 ./predict_fuyu.sh --checkpoint_path <path_to_checkpoint> --add_nr3d --add_nr3d_val
-# MV-ScanQA
-./predict_fuyu.sh --checkpoint_path <path_to_checkpoint> --add_scanqa_mv --multiple_input_images "2x2"
+# MV-ScanQA | We add an small additional LoRA when finetuning, so here the pre-trained LoRA and finetune LoRA shall be both specified
+./predict_fuyu.sh --checkpoint_path <path_to_checkpoint> --add_scanqa_mv --multiple_input_images "2x2" --base_model <path_to_pretrained_checkpoint>
 ```
 
-> **Note**: For ScanQA test set performance, you need to submit the generated result files to the official [Eval.ai platform](https://eval.ai/web/challenges/challenge-page/1715/overview).
+> **Note**: For ScanQA test set performance, you need to submit the generated result files to the official [Eval.ai platform](https://eval.ai/web/challenges/challenge-page/1715/overview). Run this script to convert prediction files to formatted ready to submit file:
+> ```bash
+> python prepare_scanqa_submission.py --prediction <path_to_prediction_json_file>
+> ```
 
 ## TODO
 - [x] Upload pre-trained checkpoints; Upload scene-view-object IoSA ratios.
@@ -188,6 +192,7 @@ Once LEGO is trained, you can run inference on downstream tasks. Below are examp
 - [x] Add view selection codes and docs; Correct file locations.
 - [x] Add gradient checkpointing for pre-training and finetuning, for low-memory GPUs like RTX 3090.
 - [x] Update correct `accelerate+transformers+peft` versions in requirements.txt.
+- [ ] Add sample selection code for TripAlign
 - [ ] Test cleaned scripts to reproduce reported performances.
 - [x] Update inference for each dataset.
 - [x] Update bibtex.

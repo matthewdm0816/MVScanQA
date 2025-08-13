@@ -6,7 +6,7 @@ import numpy as np
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Clean answer and evaluate the result')
-    parser.add_argument('--prediction', type=str, help='result file', default="/scratch/generalvision/mowentao/kuri3d-output/fuyu-8b-scanqa-2024-05-10-10-07-2024-05-10-10-07/ckpt-0/pred/scanqa.json")
+    parser.add_argument('--prediction', type=str, help='result file', default="../kuri3d-output/fuyu-8b-scanqa-2024-05-10-10-07-2024-05-10-10-07/ckpt-0/pred/scanqa.json")
     return parser.parse_args()
 
 def main(args):

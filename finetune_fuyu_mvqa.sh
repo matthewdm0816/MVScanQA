@@ -1,6 +1,6 @@
 #!/bin/bash
 export LANG=en_US.UTF-8
-export OMP_NUM_THREADS=8
+export OMP_NUM_THREADS=4
 
 if [ -z "$CUDA_VISIBLE_DEVICES" ]; then
   echo "CUDA_VISIBLE_DEVICES is not set. Detecting all available GPUs."
@@ -26,7 +26,7 @@ ulimit -n 1024000
 # <> JOINT PRETRAIN
 accelerate launch --config_file "finetune-fuyu.yaml" --num_processes=$SLURM_GPUS --main_process_port=$PORT \
     train-fuyu-merged-for-qa.py --lr "5e-5" --lr_adapter "5e-5" --lr_3d "1e-5" --weight_decay "0" --scheduler "cosine" \
-    --train_ratio 1 --num_workers 64 --verbose --gradient_clipping 1.0 \
+    --train_ratio 1 --num_workers 8 --verbose --gradient_clipping 1.0 \
     --use_3d --pooling_method "max" \
     --spatial_patch_size 24 --batch_size 1 --gradient_accumulation_steps 1 --lora_rank 128 --lora_alpha 256 \
     --generation_method "beam_search" --num_beams 5 --eval_batch_size 2 \
@@ -42,18 +42,8 @@ accelerate launch --config_file "finetune-fuyu.yaml" --num_processes=$SLURM_GPUS
     --i2t_scanqa_mv "../SVC/i2t/resampled/scanqa_mv_scene_view_map_resampled_16_4.json" \
     --checkpointing_steps 0.5 --best_criteria "scanqa-mv_em" --prompt_end_token "|ENDOFTEXT|" \
     --batch_size 1 --eval_batch_size 1 --gradient_accumulation_steps 2 \
-    --checkpoint_path ../kuri3d-output/fuyu-8b-scanqa-2024-11-03-18-51-2024-11-03-18-51/best-scan2cap_CiDEr@0.5 \
-    --checkpointing_steps 0.2 --lora_rank_finetune 4 --lora_alpha_finetune 8 --trainable_lora_in_finetune --create_new_lora_for_finetune --lr "1e-5" --lr_adapter "1e-5" \
+    --checkpoint_path ../kuri3d-output/fuyu-8b-scanqa-2025-08-13-10-10-2025-08-13-10-10/best-scan2cap_CiDEr@0.5/ \
+    --checkpointing_steps 0.25 --lora_rank_finetune 8 --lora_alpha_finetune 16 --trainable_lora_in_finetune --create_new_lora_for_finetune --lr "1e-5" --lr_adapter "1e-5" \
     "$@" \
     2>&1 | tee ../kuri-logs/log-mvqa-$(date +'%Y-%m-%d-%H-%M-%S').log
-    # --i2t_scanqa_mv "../SVC/i2t/resampled/scanqa_mv_scene_view_map_resampled_16_4.json" \
-    # --only_load_adapter --checkpoint_path "../kuri3d-output/fuyu-8b-scanqa-2024-11-11-21-50-2024-11-11-21-50/best-scan2cap_CiDEr@0.5" \ [1st stage pretrain, uni3d-mask3d-box]
 
-    # --use_phi3v --prompt_end_token "<|endoftext|>" \
-    # --add_scanrefer_nr3d --add_scanrefer_sr3d 
-    # --shuffle_objects
-    # --only_load_adapter --checkpoint_path "../SVC/pt_adapter_with_nr3d_val" 
-    # --unfreeze_word_embedding --lora_rank 8 --lora_alpha 8
-    # --use_object_index_embedding --use_object_textual_index
-    # --lora_rank -1 --batch_size 1 --no_save \
-    # --only_load_adapter --checkpoint_path "../SVC/pt_adapter_with_nr3d_val" \

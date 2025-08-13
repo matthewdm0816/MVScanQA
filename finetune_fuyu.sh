@@ -46,6 +46,6 @@ accelerate launch --config_file "finetune-fuyu.yaml" --num_processes=$SLURM_GPUS
     --add_scanqa --add_sqa3d --add_nr3d --add_scan2cap --add_sr3d --add_nr3d_val \
     --checkpointing_steps 0.5 --best_criteria "scan2cap_CiDEr@0.5" --prompt_end_token "|ENDOFTEXT|" \
     --batch_size 1 --eval_batch_size 2 --gradient_accumulation_steps 4 \
-    --only_load_adapter --checkpoint_path "../SVC/pt_adapter_with_nr3d_val" \
+    --only_load_adapter --checkpoint_path "../SVC/pt_adapter" \
     "$@" \
     2>&1 | tee ../kuri-logs/log-$(date +'%Y-%m-%d-%H-%M-%S').log    
