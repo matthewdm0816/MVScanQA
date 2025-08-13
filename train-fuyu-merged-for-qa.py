@@ -11,12 +11,15 @@ import wandb
 import numpy as np
 from datetime import datetime
 import logging
+import gc
+import psutil
 import colorama
 import random
 from tqdm.auto import tqdm
 from torch.utils.data import DataLoader, Dataset
-from accelerate import Accelerator, DistributedType, DistributedDataParallelKwargs
-from transformers.integrations.deepspeed import is_deepspeed_zero3_enabled
+from datetime import timedelta
+from accelerate import Accelerator, DistributedType, DistributedDataParallelKwargs, InitProcessGroupKwargs
+# from transformers.integrations.deepspeed import is_deepspeed_zero3_enabled
 from accelerate.state import AcceleratorState
 from accelerate.utils import gather_object
 from typing import List, Set, Tuple, Dict, Union, Any, Optional
@@ -102,6 +105,19 @@ log_format = (
 )
 
 GLOBAL_CONF = None
+
+def free_mem(verbose=False):
+    if verbose:
+        mem = psutil.virtual_memory()
+        print(f"RAM usage before gc.collect(): Total: {mem.total / 1e9:.2f}GB, Used: {mem.used / 1e9:.2f}GB, Free: {mem.free / 1e9:.2f}GB, Usage: {mem.percent}%")
+    
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    if verbose:
+        mem = psutil.virtual_memory()
+        print(f"RAM usage after gc.collect():  Total: {mem.total / 1e9:.2f}GB, Used: {mem.used / 1e9:.2f}GB, Free: {mem.free / 1e9:.2f}GB, Usage: {mem.percent}%")
+
 
 def parse_args():
     parser = ArgumentParser()
@@ -313,6 +329,8 @@ def get_model(args):
     tokenizer: LlamaTokenizerFast = processor.tokenizer
     to_remove_token_ids = set()
     tokenizer.pad_token = tokenizer.eos_token # |ENDOFTEXT|
+
+    args.accelerator.wait_for_everyone()
 
     model = Fuyu3DCausalLMv2(
         pretrained_args={
@@ -1302,6 +1320,8 @@ def train(args, epoch):
     accelerator: Accelerator = args.accelerator
     model: Fuyu3DCausalLMv2 = args.model
 
+    free_mem(verbose=accelerator.is_main_process)
+
     if args.is_finetuning:
         dataloader = args.dataloaders["finetune"]
         logger.info(f"Finetuning for {epoch - args.finetune_epochs}/{args.finetune_epochs} epochs...")
@@ -1378,7 +1398,11 @@ def train(args, epoch):
             # save checkpoint
             # only save PEFT lora
             # only save when full training
-            if args.train_ratio == 1 and not args.no_save:
+            # if args.train_ratio == 1 and not args.no_save and accelerator.is_main_process:
+            # show mem usage
+            free_mem(verbose=accelerator.is_local_main_process)
+            
+            if not args.no_save and accelerator.is_local_main_process:
                 output_dir_ckpt = os.path.join(output_dir, f"ckpt-{len(args.history_losses)}")
                 if not os.path.exists(output_dir_ckpt):
                     os.makedirs(output_dir_ckpt, exist_ok=True)
@@ -1655,7 +1679,8 @@ if __name__ == "__main__":
     args.slurm_gpus = os.environ.get("SLURM_GPUS", None)
         
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
-    accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps, kwargs_handlers=[ddp_kwargs])
+    init_kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=800000))
+    accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps, kwargs_handlers=[init_kwargs, ddp_kwargs])
     args.accelerator = accelerator
     average_meter.accelerator = accelerator
     
@@ -1814,7 +1839,7 @@ if __name__ == "__main__":
         # save
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
-        if not args.no_save:
+        if not args.no_save and accelerator.is_local_main_process:
             unwrapped_model: Fuyu3DCausalLMv2 = accelerator.unwrap_model(args.model)
             unwrapped_model.save_pretrained(output_dir)
 

@@ -56,7 +56,7 @@ MEAN_COLOR_RGB = np.array([109.8, 97.2, 83.8])
 N_SHOW_CAPTION_SAMPLES = 10
 
 DATA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
-SVC_PATH = "/hostdir/mwt/SVC" # <- change this to your SVC path
+SVC_PATH = "/root/SVC" # <- change this to your SVC path
 
 def print_once(message):
     if not hasattr(print_once, "printed"):
@@ -629,8 +629,8 @@ class VisualInstructionTuningDataset3D(Dataset, PointCloudProcessMixin, LogDatas
         if type == "pnpp":
             return f"{DATA_PATH}/scannetv2-pnpp-feature.pkl"
         elif type == "pnpp-vote2cap-box":
-            return f"{SVC_PATH}/pc_features/scannetv2-vote2cap-feature_box_features_281d.pkl" # its box need flip!
-            # return f"{SVC_PATH}/pc_features/scannetv2-vote2cap-feature-new-2_box_features_281d.pkl" # this don't
+            # return f"{SVC_PATH}/pc_features/scannetv2-vote2cap-feature_box_features_281d.pkl" # its box need flip!
+            return f"{SVC_PATH}/pc_features/scannetv2-vote2cap-feature-new-2_box_features_281d.pkl" # this don't
         elif type == "uni3d-mask3d-box":
             return f"{SVC_PATH}/pc_features/chatscene_features/scannet_mask3d_trainval_feat+bbox_feats.pt" # 1030d
         elif type == "pnpp-vote2cap-enc":
@@ -1295,7 +1295,7 @@ class VisualInstructionTuningDataset3D(Dataset, PointCloudProcessMixin, LogDatas
         instructions["scene_id"] = scene_id
 
         #  --- change object_index according to shuffled object features ---
-        instructions = self.process_instructions(instructions, shuffled_indices_trimmed=shuffled_indices_trimmed)
+        instructions = self.process_instructions(instructions, shuffled_indices_trimmed=shuffled_indices_trimmed if self.shuffle_objects and self.split == "train" and not self.enforce_validation else None)
 
         prompt = self.prompt if isinstance(self.prompt, str) else np.random.choice(self.prompt)
         target = prompt.format(**instructions)
