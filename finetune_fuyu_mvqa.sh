@@ -2,6 +2,17 @@
 export LANG=en_US.UTF-8
 export OMP_NUM_THREADS=8
 
+if [ -z "$CUDA_VISIBLE_DEVICES" ]; then
+  echo "CUDA_VISIBLE_DEVICES is not set. Detecting all available GPUs."
+  NUM_GPUS=$(nvidia-smi -L | wc -l)
+  if [ "$NUM_GPUS" -gt 0 ]; then
+    export CUDA_VISIBLE_DEVICES=$(seq 0 $(($NUM_GPUS - 1)) | paste -sd, -)
+    echo "Setting CUDA_VISIBLE_DEVICES to $CUDA_VISIBLE_DEVICES"
+  else
+    echo "No GPUs found."
+  fi
+fi
+
 # Auto GPU NUMBER
 export SLURM_GPUS=$(($(echo $CUDA_VISIBLE_DEVICES | tr -cd , | wc -c)+1))
 
@@ -27,13 +38,13 @@ accelerate launch --config_file "finetune-fuyu.yaml" --num_processes=$SLURM_GPUS
     --weight_decay_adapter 0.1 --weight_decay 0.1 \
     --tag "ffn mvqa" \
     --use_focus_bbox \
-    --add_scanqa_mv --multiple_input_images "4x1" \
+    --add_scanqa_mv --multiple_input_images "2x2" --validate_at_start \
     --i2t_scanqa_mv "../SVC/i2t/resampled/scanqa_mv_scene_view_map_resampled_16_4.json" \
     --checkpointing_steps 0.5 --best_criteria "scanqa-mv_em" --prompt_end_token "|ENDOFTEXT|" \
     --batch_size 1 --eval_batch_size 1 --gradient_accumulation_steps 2 \
     --checkpoint_path ../kuri3d-output/fuyu-8b-scanqa-2024-11-03-18-51-2024-11-03-18-51/best-scan2cap_CiDEr@0.5 \
     --checkpointing_steps 0.2 --lora_rank_finetune 4 --lora_alpha_finetune 8 --trainable_lora_in_finetune --create_new_lora_for_finetune --lr "1e-5" --lr_adapter "1e-5" \
-    --multiple_input_images "4x1" --validate_at_start \
+    "$@" \
     2>&1 | tee ../kuri-logs/log-mvqa-$(date +'%Y-%m-%d-%H-%M-%S').log
     # --i2t_scanqa_mv "../SVC/i2t/resampled/scanqa_mv_scene_view_map_resampled_16_4.json" \
     # --only_load_adapter --checkpoint_path "../kuri3d-output/fuyu-8b-scanqa-2024-11-11-21-50-2024-11-11-21-50/best-scan2cap_CiDEr@0.5" \ [1st stage pretrain, uni3d-mask3d-box]

@@ -25,10 +25,10 @@ accelerate launch --config_file "finetune-fuyu.yaml" --num_processes=$SLURM_GPUS
     --tag "ffn finetune predict" \
     --use_focus_bbox \
     --validate_at_start --no_save --scan2cap_metric_type recall \
-    --add_scan2cap \
     --lora_rank_finetune 4 --lora_alpha_finetune 8 --lora_dropout_finetune 0.05 --trainable_lora_in_finetune \
     --checkpointing_steps 0.2  --prompt_end_token "|ENDOFTEXT|" \
-    --checkpoint_path ../SVC/LEGO/best-scan2cap_CiDEr@0.5 \
+    --checkpoint_path ../kuri3d-output/fuyu-8b-scanqa-2025-08-13-10-10-2025-08-13-10-10/best-scan2cap_CiDEr@0.5/ \
+    "$@" \
     2>&1 | tee ../kuri-logs/log-prediction-$(date +'%Y-%m-%d-%H-%M-%S').log
 
     # --clean_qa_answer \

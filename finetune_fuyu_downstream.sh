@@ -1,7 +1,17 @@
 #!/bin/bash
-
 export LANG=en_US.UTF-8
 export OMP_NUM_THREADS=8
+
+if [ -z "$CUDA_VISIBLE_DEVICES" ]; then
+  echo "CUDA_VISIBLE_DEVICES is not set. Detecting all available GPUs."
+  NUM_GPUS=$(nvidia-smi -L | wc -l)
+  if [ "$NUM_GPUS" -gt 0 ]; then
+    export CUDA_VISIBLE_DEVICES=$(seq 0 $(($NUM_GPUS - 1)) | paste -sd, -)
+    echo "Setting CUDA_VISIBLE_DEVICES to $CUDA_VISIBLE_DEVICES"
+  else
+    echo "No GPUs found."
+  fi
+fi
 
 # Auto GPU NUMBER
 export SLURM_GPUS=$(($(echo $CUDA_VISIBLE_DEVICES | tr -cd , | wc -c)+1))
@@ -33,6 +43,7 @@ accelerate launch --config_file "finetune-fuyu.yaml" --num_processes=$SLURM_GPUS
     --checkpoint_path ../kuri3d-output/fuyu-8b-scanqa-2024-11-03-18-51-2024-11-03-18-51/best-scan2cap_CiDEr@0.5 \
     --lora_rank_finetune 4 --lora_alpha_finetune 8 \
     --trainable_lora_in_finetune --create_new_lora_for_finetune --lr "1e-5" --lr_adapter "1e-5" \
+    "$@" \
     2>&1 | tee ../kuri-logs/log-downstream-$(date +'%Y-%m-%d-%H-%M-%S').log
     # --use_no_location_text \
     # --use_focus_bbox \
