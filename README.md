@@ -4,6 +4,12 @@ This work is accepted by ACM MM 2025. [Demo & Project Page](https://matthewdm081
 
 ![Teasor](docs/teasor-mm-lego.svg)
 
+## Index
+1. [Getting Started](#getting-started)
+2. [Training](#training)
+3. [Evaluation](#evaluation)
+4. [Inference](#inference)
+
 ## Getting Started
 
 This guide will walk you through setting up the environment and data to run our code.
