@@ -59,16 +59,17 @@ uv pip install -r requirements.txt
 ## Results
 
 Here are the reproduced results from running this cleaned script.
-| Dataset                                | Results (Reproduced) | Results (Reported)
-| -------------------------------------- | ------- | --- |
-| ScanQA (val), EM                       | 28.3    | 28.4   |
-| ScanQA (test with object), EM          | [N/A due to eval.ai outage]    | 33.7   |
-| ScanQA (test without object), EM       | [N/A due to eval.ai outage]    | 32.7   |
-| Scan2Cap (on ScanRefer), CiDER@0.25    | 83.9    | 84.7   |
-| Scan2Cap (on ScanRefer), CiDER@0.5     | 78.0    | 78.6   |
-| Scan2Cap (on Nr3D), CiDER@0.5          | 62.8    | 61.4   |
-| MV-ScanQA, EM                          | 33.7    | 34.1   |
-<!-- | SQA3D, EM                              |         |  -     | -->
+| Dataset                                | Results
+| -------------------------------------- | ------- | 
+| ScanQA (val), EM  [[Checkpoint]](https://huggingface.co/kmichiru/LEGO/tree/main/best-pretrained-reproduced)                    | 28.3    |
+| ScanQA (test with object), EM [[Checkpoint]](https://huggingface.co/kmichiru/LEGO/tree/main/best-pretrained-reproduced)          | [N/A due to eval.ai outage]    | 
+| ScanQA (test without object), EM [[Checkpoint]](https://huggingface.co/kmichiru/LEGO/tree/main/best-pretrained-reproduced)       | [N/A due to eval.ai outage]    | 
+| Scan2Cap (on ScanRefer), CiDER@0.25 [[Checkpoint]](https://huggingface.co/kmichiru/LEGO/tree/main/best-pretrained-reproduced)    | 83.9    | 
+| Scan2Cap (on ScanRefer), CiDER@0.5  [[Checkpoint]](https://huggingface.co/kmichiru/LEGO/tree/main/best-pretrained-reproduced)    | 78.0    | 
+| Scan2Cap (on Nr3D), CiDER@0.5 [[Checkpoint]](https://huggingface.co/kmichiru/LEGO/tree/main/best-pretrained-reproduced)          | 62.8    | 
+| MV-ScanQA, EM [[Checkpoint]](https://huggingface.co/kmichiru/LEGO/tree/main/best-pretrained-reproduced) + [[Checkpoint]](https://huggingface.co/kmichiru/LEGO/tree/main/best-scanqa-mv_em)            | 33.7    | 
+
+Please refer to [here](#inference) for detailed inference script.
 
 ## Data Preparation (Optional)
 
@@ -200,7 +201,7 @@ Once LEGO is trained, you can run inference on downstream tasks. Below are examp
 - [x] Add gradient checkpointing for pre-training and finetuning, for low-memory GPUs like RTX 3090.
 - [x] Update correct `accelerate+transformers+peft` versions in requirements.txt.
 - [ ] Add sample selection code for TripAlign
-- [ ] Test cleaned scripts to reproduce reported performances.
+- [x] Test cleaned scripts to reproduce reported performances.
 - [x] Update inference for each dataset.
 - [x] Update bibtex.
 
