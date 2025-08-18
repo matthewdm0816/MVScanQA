@@ -7,10 +7,8 @@ This work is accepted by ACM MM 2025.
 
 ## Contents
 1. [Getting Started](#getting-started)
-2. [Results](#results)
-3. [Data Preparation (Optional)](#data-preparation-optional)
-4. [Training](#training)
-5. [Inference](#inference)
+2. [Training](#training)
+3. [Inference](#inference)
 
 ## Getting Started
 
@@ -57,85 +55,18 @@ uv pip install -r requirements.txt
 
 > **Note**: Some scripts download models from Hugging Face. If you are in a region with restricted access, you may need to set `HF_ENDPOINT` or `ALL_PROXY`.
 
-## Results
 
-Here are the reproduced results from running this cleaned script.
-| Dataset                                | Results
-| -------------------------------------- | ------- | 
-| ScanQA (val), EM  [[Checkpoint]](https://huggingface.co/kmichiru/LEGO/tree/main/best-pretrained-reproduced)                    | 28.3    |
-| ScanQA (test with object), EM [[Checkpoint]](https://huggingface.co/kmichiru/LEGO/tree/main/best-pretrained-reproduced)          | [N/A due to eval.ai outage]    | 
-| ScanQA (test without object), EM [[Checkpoint]](https://huggingface.co/kmichiru/LEGO/tree/main/best-pretrained-reproduced)       | [N/A due to eval.ai outage]    | 
-| Scan2Cap (on ScanRefer), CiDER@0.25 [[Checkpoint]](https://huggingface.co/kmichiru/LEGO/tree/main/best-pretrained-reproduced)    | 83.9    | 
-| Scan2Cap (on ScanRefer), CiDER@0.5  [[Checkpoint]](https://huggingface.co/kmichiru/LEGO/tree/main/best-pretrained-reproduced)    | 78.0    | 
-| Scan2Cap (on Nr3D), CiDER@0.5 [[Checkpoint]](https://huggingface.co/kmichiru/LEGO/tree/main/best-pretrained-reproduced)          | 62.8    | 
-| MV-ScanQA, EM [[Checkpoint]](https://huggingface.co/kmichiru/LEGO/tree/main/best-pretrained-reproduced) + [[Checkpoint]](https://huggingface.co/kmichiru/LEGO/tree/main/best-scanqa-mv_em)            | 33.7    | 
+Please refer to [DATA PREPARATION](DATA.md) for detailed data preparation steps. You only need to run these steps if you want to regenerate the data from scratch.
 
-Please refer to [here](#inference) for detailed inference script.
 
-## Data Preparation (Optional)
-
-The "SVC" data package already contains all the pre-processed data needed for training and inference. You only need to run these steps if you want to regenerate the data from scratch.
-
-### Pre-compute View-Object IoSA ratios
-IoSA (Intersection over Smallest Area) ratios between each view and each 3D object are pre-computed for ScanNet scenes. To pre-compute them, run:    
-```bash
-python data_utils/calculate_view_object_iosa_map.py
-```
-This will generate a `scene_view_object_overlap_data.pkl` file that records the IoSA ratios between each view and each 3D object for each scene. This file can be used for
-- visibility-based solvability analysis for current 3D vision-language datasets and our proposed two datasets.
-- selecting best views for each instruction for tasks with certain object as input (e.g. Scan2Cap on ScanRefer and Nr3D).
-
-> **Note**: The pre-computed file is also included in our compiled data.
-
-### Compose ScanQA Questions into MV-ScanQA
-We compose ScanQA questions into more complex multi-view questions by LLMs to form MV-ScanQA dataset:
-```bash
-# Configure your own api_key, model_name, base_url in `compose_mv_scanqa_from_question_pairs.py` first.
-python data_utils/compose_mv_scanqa_from_question_pairs_mp.py
-# Filter questions and annotate "n-views-can-solve" difficulty levels for each question
-python data_utils/filter_scanqa_mv.py
-```
-
-### TripAlign (2D+3D $\Rightarrow$ Text): Caption Generation for TripAlign
-We use pre-trained LVLMs to generate captions for the TripAlign dataset. We provide captions from both LLaVA-1.5-7B and GPT-4o. We found GPT-4o captions to be more accurate and recommend using them for better overall performance.
-```bash
-# For LLaVA-1.5-7B captions. Replace `SVC_PATH` in the script first.
-python data_utils/caption_scannet_mt.py --scene_range 0-10000
-```
-```bash
-# For GPT-4o captions. Tweak base_url and model_name in the script if needed.
-python data_utils/caption_by_api.py --directory <scannet_views_directory> --api_key <your_openai_api_key>
-```
-
-### TripAlign (3D+Text $\Rightarrow$ 2D): Extending Existing 3D Vision-Language Datasets with Paired Views
-For existing 3D QA datasets (ScanQA, SQA3D, MV-ScanQA), we select relevant views for each question:
-```bash
-# QA datasets (ScanQA, SQA3D, MV-ScanQA)
-python data_utils/eval_scene_best_views.py --dataset (scanqa|sqa3d|scanqa_mv) --not_eval_vqa --nocheck_blank --outfile <output_file>
-```
-This generates an `i2t` file for each dataset, which ranks views by relevance to each instruction. For MV-ScanQA, we further select a diverse set of views (i.e., remove too similar views):
-```bash
-python data_utils/resample_views.py
-```
-For dense captioning tasks, we select views for each object:
-```bash
-# Dense Caption datasets (Scan2Cap on ScanRefer and Nr3D)
-# For training (using ground-truth object locations)
-python data_utils/calculate_object_centric_views.py
-# For evaluation/inference (using detected object proposals from Mask3D)
-python data_utils/calculate_object_centric_views_for_mask3d.py
-```
-
-> **Note**: 
-> - These selected views are used in both pre-training and inference.
-> - View selection for QA tasks is based only on the question text.
-> - View selection for captioning tasks is based on object locations (ground-truth for training, detected proposals for inference), without access to any response annotations.
 
 ## Training
 
 > **Note**: Training typically requires GPUs with 40GB of VRAM and 150-300GB of system RAM (for 4-8 GPUs). Results are saved to `<REPO_PARENT>/kuri3d-output`. Please log in to `wandb` to track metrics, or disable it with `wandb disabled`.
 
-### Pre-extract 3D Object Features
+### Pre-extract 3D Object Features (Optional)
+We have pre-extracted and included the 3D object features in the "SVC" data package. You only need to run this step if you want to regenerate the features from scratch.
+
 1. Download the pre-trained 3D detector from [Vote2Cap-DETR](ch3cook-fdu/Vote2Cap-DETR) or our compiled data.
 2. Compile and install PointNet++:
 ```bash
@@ -149,7 +80,7 @@ python setup.py install
 
 
 ### TripAlign Pre-training
-1. **1st Stage (Optional)**: Pre-train a 3D feature adapter with the 2D LVLM backbone frozen. We found this stage has a minor impact on final performance, so feel free to skip it to save time.
+1. **1st Stage (Optional)**: Pre-train a 3D feature adapter with the 2D LVLM backbone frozen. We found this stage has a minor impact on final performance, so feel free to skip it to save time. We also provide the pre-trained 3D feature adapter in "SVC" data package.
 ```bash
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 ./finetune_fuyu_1st_stage.sh
@@ -173,6 +104,57 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 ./finetune_fuyu_downstream.sh --checkpoint_path <path_to_pretrained_checkpoint>
 ```
 We also provide finetuned checkpoint for MV-ScanQA [here](https://huggingface.co/kmichiru/LEGO/tree/main/best-scanqa-mv_em).
+
+### Results
+
+Here are the reproduced results from running this cleaned script.
+<table>
+  <tr>
+    <th>Checkpoint</th>
+    <th>Dataset</th>
+    <th>Metric</th>
+    <th>Result</th>
+  </tr>
+  <tr>
+    <td rowspan=6 style="vertical-align: middle; text-align: center;"><a href="https://huggingface.co/kmichiru/LEGO/tree/main/best-pretrained-reproduced">best-pretrained-reproduced</a></td>
+    <td>ScanQA (val)</td>
+    <td>EM</td>
+    <td>28.3</td>
+  </tr>
+  <tr>
+    <td>ScanQA (test with object)</td>
+    <td>EM</td>
+    <td>[N/A due to eval.ai outage]</td>
+  </tr>
+  <tr>
+    <td>ScanQA (test without object)</td>
+    <td>EM</td>
+    <td>[N/A due to eval.ai outage]</td>
+  </tr>
+  <tr>
+    <td>Scan2Cap (on ScanRefer)</td>
+    <td>CiDER@0.25</td>
+    <td>83.9</td>
+  </tr>
+  <tr>
+    <td>Scan2Cap (on ScanRefer)</td>
+    <td>CiDER@0.5</td>
+    <td>78.0</td>
+  </tr>
+  <tr>
+    <td>Scan2Cap (on Nr3D)</td>
+    <td>CiDER@0.5</td>
+    <td>62.8</td>
+  </tr>
+  <tr>
+    <td style="vertical-align: middle; text-align: center;"><a href="https://huggingface.co/kmichiru/LEGO/tree/main/best-pretrained-reproduced">best-pretrained-reproduced</a> + <a href="https://huggingface.co/kmichiru/LEGO/tree/main/best-scanqa-mv_em">best-scanqa-mv_em</a></td>
+    <td>MV-ScanQA</td>
+    <td>EM</td>
+    <td>33.7</td>
+  </tr>
+</table>
+
+Please refer to [Inference](#inference) for detailed inference script.
 
 ## Inference
 Once LEGO is trained, you can run inference on downstream tasks. Below are example commands. Please change the dataset options in the shell scripts as needed.
