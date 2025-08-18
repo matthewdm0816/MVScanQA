@@ -1,7 +1,10 @@
 # _Advancing 3D Scene Understanding with MV-ScanQA Multi-View Reasoning Evaluation and TripAlign Pre-training Dataset_ - Official Codebase
 
 This work is accepted by ACM MM 2025. 
-[Demo & Project Page](https://matthewdm0816.github.io/tripalign-mvscanqa/) [ArXiv Page](https://arxiv.org/abs/2508.11058)
+
+[Demo & Project Page](https://matthewdm0816.github.io/tripalign-mvscanqa/) 
+
+[ArXiv Page](https://arxiv.org/abs/2508.11058)
 
 ![Teasor](docs/teasor-mm-lego.svg)
 
